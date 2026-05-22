@@ -1,0 +1,6 @@
+{
+  "name": "Acoustic",
+  "description": "A native local audio player with dark theme, background playback, and playlist support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
