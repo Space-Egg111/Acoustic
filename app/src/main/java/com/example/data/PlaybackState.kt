@@ -16,5 +16,7 @@ data class PlaybackState(
     val bgAlpha: Float = 0.24f,
     val bgScale: Float = 2.4f,
     val bgWaveOpacity: Float = 0.85f,
-    val bgContentScale: String = "Crop"
+    val bgContentScale: String = "Crop",
+    val audioEnergy: Float = 0f,
+    val audioWaveform: IntArray? = null
 )

@@ -53,14 +53,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _themeColorMode = MutableStateFlow(ThemeColorMode.EXACT_ART_COLORS)
     val themeColorMode: StateFlow<ThemeColorMode> = _themeColorMode.asStateFlow()
 
+    private val _artworkColorGrid = MutableStateFlow<IntArray?>(null)
+    val artworkColorGrid: StateFlow<IntArray?> = _artworkColorGrid.asStateFlow()
+
     private val _fluidBgEnabled = MutableStateFlow(true)
     val fluidBgEnabled: StateFlow<Boolean> = _fluidBgEnabled.asStateFlow()
+
+    private val _introAnimationEnabled = MutableStateFlow(false)
+    val introAnimationEnabled: StateFlow<Boolean> = _introAnimationEnabled.asStateFlow()
 
     private val _waveSpeed = MutableStateFlow(1.0f)
     val waveSpeed: StateFlow<Float> = _waveSpeed.asStateFlow()
 
     private val _waveRoughness = MutableStateFlow(1.0f)
     val waveRoughness: StateFlow<Float> = _waveRoughness.asStateFlow()
+
+    private val _waveArtworkInfluence = MutableStateFlow(0.7f)
+    val waveArtworkInfluence: StateFlow<Float> = _waveArtworkInfluence.asStateFlow()
 
     private val _waveColorStyle = MutableStateFlow("Dynamic Track")
     val waveColorStyle: StateFlow<String> = _waveColorStyle.asStateFlow()
@@ -76,12 +85,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _fluidBgEnabled.value = enabled
     }
 
+    fun setIntroAnimationEnabled(enabled: Boolean) {
+        _introAnimationEnabled.value = enabled
+    }
+
     fun setWaveSpeed(speed: Float) {
         _waveSpeed.value = speed
     }
 
     fun setWaveRoughness(roughness: Float) {
         _waveRoughness.value = roughness
+    }
+
+    fun setWaveArtworkInfluence(influence: Float) {
+        _waveArtworkInfluence.value = influence
     }
 
     fun setWaveColorStyle(style: String) {
@@ -208,6 +225,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playSong(song: Song, list: List<Song>) {
         playbackService?.setQueue(list, list.indexOf(song))
+    }
+
+    fun shuffleAndPlay(list: List<Song>) {
+        playbackService?.shuffleAndPlay(list)
     }
 
     fun togglePlayback() {
@@ -844,7 +865,100 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
             _currentTrackColor.value = resolvedColor
             _currentTrackColors.value = resolvedColors
+            _artworkColorGrid.value = if (song != null) extractArtworkColorGrid(song) else null
         }
+    }
+
+    private fun extractArtworkColorGrid(song: Song): IntArray? {
+        try {
+            var artInputStream: java.io.InputStream? = null
+            val context = getApplication<Application>()
+            
+            if (song.albumArtPath != null) {
+                if (song.albumArtPath.startsWith("content://")) {
+                    try {
+                        artInputStream = context.contentResolver.openInputStream(Uri.parse(song.albumArtPath))
+                    } catch (e: Exception) {}
+                } else {
+                    val file = File(song.albumArtPath)
+                    if (file.exists()) artInputStream = file.inputStream()
+                }
+            }
+
+            if (artInputStream == null && song.path.startsWith("content://")) {
+                try {
+                    artInputStream = context.contentResolver.openInputStream(Uri.parse(song.path))
+                } catch (e: Exception) {}
+            }
+
+            if (artInputStream == null) {
+                val file = File(song.path)
+                if (file.exists()) {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(song.path)
+                        val bytes = retriever.embeddedPicture
+                        if (bytes != null) artInputStream = java.io.ByteArrayInputStream(bytes)
+                    } catch (e: Exception) {
+                    } finally {
+                        retriever.release()
+                    }
+                }
+            }
+
+            artInputStream?.use { stream ->
+                val options = android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                android.graphics.BitmapFactory.decodeStream(stream, null, options)
+                
+                // reset stream to reread
+                stream.reset()
+            }
+        } catch (e: Exception) {}
+        
+        // Let's do a simpler stream reopen for decoded
+        try {
+            var artInputStream: java.io.InputStream? = null
+            val context = getApplication<Application>()
+            if (song.albumArtPath != null && song.albumArtPath.startsWith("content://")) {
+                artInputStream = context.contentResolver.openInputStream(Uri.parse(song.albumArtPath))
+            } else if (song.albumArtPath != null) {
+                val file = File(song.albumArtPath)
+                if (file.exists()) artInputStream = file.inputStream()
+            }
+            if (artInputStream == null && song.path.startsWith("content://")) {
+               artInputStream = context.contentResolver.openInputStream(Uri.parse(song.path))
+            }
+            if (artInputStream == null) {
+                val file = File(song.path)
+                if (file.exists()) {
+                    val retriever = android.media.MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(song.path)
+                        val bytes = retriever.embeddedPicture
+                        if (bytes != null) artInputStream = java.io.ByteArrayInputStream(bytes)
+                    } finally { retriever.release() }
+                }
+            }
+            
+            artInputStream?.use { stream ->
+                val options = android.graphics.BitmapFactory.Options().apply {
+                     inSampleSize = 4
+                }
+                val bitmap = android.graphics.BitmapFactory.decodeStream(stream, null, options)
+                if (bitmap != null) {
+                    val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, 64, 64, true)
+                    val pixels = IntArray(64 * 64)
+                    scaled.getPixels(pixels, 0, 64, 0, 0, 64, 64)
+                    if (scaled != bitmap) scaled.recycle()
+                    bitmap.recycle()
+                    return pixels
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        
+        return null
     }
 
     private fun extractDominantFromArt(song: Song): Color? {

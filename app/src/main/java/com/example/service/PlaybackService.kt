@@ -72,6 +72,9 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
     // Coroutines Scope for updates
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var progressJob: Job? = null
+    
+    // Audio Visualizer
+    private var visualizer: android.media.audiofx.Visualizer? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -101,6 +104,44 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
 
     // --- Audio Player Initialization ---
 
+    private fun setupVisualizer(audioSessionId: Int) {
+        try {
+            visualizer?.release()
+            visualizer = android.media.audiofx.Visualizer(audioSessionId).apply {
+                captureSize = 128
+                setDataCaptureListener(object : android.media.audiofx.Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(
+                        v: android.media.audiofx.Visualizer?,
+                        waveform: ByteArray?,
+                        samplingRate: Int
+                    ) {
+                        if (waveform != null && _playbackState.value.isPlaying) {
+                            var sum = 0f
+                            val ints = IntArray(waveform.size)
+                            for (i in waveform.indices) {
+                                val amp = waveform[i].toInt() - 128
+                                ints[i] = amp
+                                sum += kotlin.math.abs(amp)
+                            }
+                            // Calculate average energy normalized to 0..1 roughly
+                            val energy = (sum / waveform.size) / 128f
+                            _playbackState.update { it.copy(audioEnergy = energy * 2f, audioWaveform = ints) }
+                        }
+                    }
+
+                    override fun onFftDataCapture(
+                        v: android.media.audiofx.Visualizer?,
+                        fft: ByteArray?,
+                        samplingRate: Int
+                    ) {}
+                }, android.media.audiofx.Visualizer.getMaxCaptureRate() / 2, true, false)
+                enabled = true
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private fun getOrCreatePrimaryPlayer(): MediaPlayer {
         val player = primaryPlayer ?: MediaPlayer().apply {
             setAudioAttributes(
@@ -114,6 +155,9 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
                     onSongCompleted()
                 }
             }
+        }
+        if (primaryPlayer == null) {
+            setupVisualizer(player.audioSessionId)
         }
         primaryPlayer = player
         return player
@@ -526,6 +570,22 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
         updateState()
     }
 
+    fun shuffleAndPlay(songs: List<Song>) {
+        isShuffle = true
+        playlistQueue.clear()
+        playlistQueue.addAll(songs)
+        applyShuffleQueue()
+        
+        currentQueueIndex = if (shuffledQueue.isNotEmpty()) 0 else -1
+        val selectedSong = shuffledQueue.firstOrNull()
+        if (selectedSong != null) {
+            loadAndPlaySong(selectedSong)
+        } else {
+            stopPlayback()
+        }
+        updateState()
+    }
+
     fun toggleRepeat() {
         isRepeat = !isRepeat
         updateState()
@@ -573,15 +633,21 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
 
     private fun startProgressUpdater() {
         progressJob = serviceScope.launch {
+            var lastMediaSessionUpdate = System.currentTimeMillis()
             while (isActive) {
-                delay(200)
+                delay(30)
                 primaryPlayer?.let { player ->
                     if (player.isPlaying && !isCrossfading) {
                         val currentPos = player.currentPosition.toLong()
                         val totDuration = player.duration.toLong()
                         
                         _playbackState.update { it.copy(progress = currentPos, duration = totDuration) }
-                        updateMediaSessionState()
+                        
+                        val now = System.currentTimeMillis()
+                        if (now - lastMediaSessionUpdate > 1000) {
+                            updateMediaSessionState()
+                            lastMediaSessionUpdate = now
+                        }
 
                         // Check for crossfade trigger
                         val queue = getActiveQueue()
@@ -729,6 +795,9 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
 
         currentAlbumArtBitmap?.recycle()
         currentAlbumArtBitmap = null
+
+        visualizer?.release()
+        visualizer = null
 
         primaryPlayer?.release()
         secondaryPlayer?.release()

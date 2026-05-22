@@ -90,9 +90,12 @@ fun AcousticApp(
     val playState by viewModel.playbackState.collectAsStateWithLifecycle()
     val themeColorMode by viewModel.themeColorMode.collectAsStateWithLifecycle()
     val fluidBgEnabled by viewModel.fluidBgEnabled.collectAsStateWithLifecycle()
+    val introAnimationEnabled by viewModel.introAnimationEnabled.collectAsStateWithLifecycle()
     val waveSpeed by viewModel.waveSpeed.collectAsStateWithLifecycle()
     val waveRoughness by viewModel.waveRoughness.collectAsStateWithLifecycle()
+    val waveArtworkInfluence by viewModel.waveArtworkInfluence.collectAsStateWithLifecycle()
     val waveColorStyle by viewModel.waveColorStyle.collectAsStateWithLifecycle()
+    val artworkColorGrid by viewModel.artworkColorGrid.collectAsStateWithLifecycle()
     val currentTrackColor by viewModel.currentTrackColor.collectAsStateWithLifecycle()
     val currentTrackColors by viewModel.currentTrackColors.collectAsStateWithLifecycle()
     val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
@@ -188,103 +191,6 @@ fun AcousticApp(
         LocalElectricCyan provides animatedSecondaryColor,
         com.example.ui.theme.LocalTrackColors provides listOf(animatedTrackColor, animatedColor2, animatedColor3)
     ) {
-        // --- 1D Wave Fallback Simulation State ---
-        val steps = 50
-        val waveH1 = remember { FloatArray(steps + 1) }
-        val waveV1 = remember { FloatArray(steps + 1) }
-        val waveH2 = remember { FloatArray(steps + 1) }
-        val waveV2 = remember { FloatArray(steps + 1) }
-        val waveH3 = remember { FloatArray(steps + 1) }
-        val waveV3 = remember { FloatArray(steps + 1) }
-
-        val applyTouchForce = remember {
-            { normalizedX: Float, forceX: Float ->
-                val centerIndex = (normalizedX * steps).toInt().coerceIn(0, steps)
-                val spread = 5
-                for (i in -spread..spread) {
-                    val idx = centerIndex + i
-                    if (idx in 0..steps) {
-                        val dist = Math.abs(i).toFloat() / spread
-                        val factor = (1f - dist * dist).coerceIn(0f, 1f)
-                        waveH1[idx] += forceX * factor * 1.0f
-                        waveH2[idx] -= forceX * factor * 1.2f
-                        waveH3[idx] += forceX * factor * 0.8f
-                    }
-                }
-            }
-        }
-
-        var waveTime by remember { mutableStateOf(0f) }
-        var tick1D by remember { mutableStateOf(0L) }
-
-        LaunchedEffect(playState.isPlaying) {
-            var lastTime = withFrameNanos { it }
-            while (true) {
-                withFrameNanos { frameTimeNanos ->
-                    val diffNanos = frameTimeNanos - lastTime
-                    val diffSeconds = (diffNanos / 1_000_000_000f).coerceAtMost(0.05f)
-                    lastTime = frameTimeNanos
-                    
-                    if (!fluidBgEnabled) {
-                        // Time based orbital drift
-                        val speed = if (playState.isPlaying) 0.60f else 0.12f
-                        waveTime = (waveTime + speed * diffSeconds) % (2f * Math.PI.toFloat())
-
-                        // 1D Wave equation simulation update
-                        val subSteps = 2
-                        val dt = diffSeconds / subSteps
-                        val damping = 0.94f
-                        val k1 = 120f
-                        val k2 = 180f
-                        val k3 = 90f
-
-                        for (step in 1..subSteps) {
-                            // Wave 1 Physics
-                            for (i in 1 until steps) {
-                                val accel = k1 * (waveH1[i - 1] + waveH1[i + 1] - 2 * waveH1[i])
-                                waveV1[i] = (waveV1[i] + accel * dt) * damping
-                            }
-                            waveV1[0] = (waveV1[0] + k1 * (waveH1[1] - waveH1[0]) * dt) * damping
-                            waveV1[steps] = (waveV1[steps] + k1 * (waveH1[steps - 1] - waveH1[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH1[i] += waveV1[i] * dt
-                            }
-
-                            // Wave 2 Physics
-                            for (i in 1 until steps) {
-                                val accel = k2 * (waveH2[i - 1] + waveH2[i + 1] - 2 * waveH2[i])
-                                waveV2[i] = (waveV2[i] + accel * dt) * damping
-                            }
-                            waveV2[0] = (waveV2[0] + k2 * (waveH2[1] - waveH2[0]) * dt) * damping
-                            waveV2[steps] = (waveV2[steps] + k2 * (waveH2[steps - 1] - waveH2[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH2[i] += waveV2[i] * dt
-                            }
-
-                            // Wave 3 Physics
-                            for (i in 1 until steps) {
-                                val accel = k3 * (waveH3[i - 1] + waveH3[i + 1] - 2 * waveH3[i])
-                                waveV3[i] = (waveV3[i] + accel * dt) * damping
-                            }
-                            waveV3[0] = (waveV3[0] + k3 * (waveH3[1] - waveH3[0]) * dt) * damping
-                            waveV3[steps] = (waveV3[steps] + k3 * (waveH3[steps - 1] - waveH3[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH3[i] += waveV3[i] * dt
-                            }
-                        }
-
-                        for (i in 0..steps) {
-                            waveH1[i] *= 0.985f
-                            waveH2[i] *= 0.985f
-                            waveH3[i] *= 0.985f
-                        }
-
-                        tick1D++
-                    }
-                }
-            }
-        }
-
         // --- 2D WebGL Fluid Simulation State ---
         val fluidSim = remember { FluidSimulation(NX = 1440, NY = 3168) }
         var tick2D by remember { mutableStateOf(0L) }
@@ -292,6 +198,9 @@ fun AcousticApp(
         val currentWaveSpeed by rememberUpdatedState(waveSpeed)
         val currentWaveRoughness by rememberUpdatedState(waveRoughness)
         val currentWaveColorStyle by rememberUpdatedState(waveColorStyle)
+        val currentArtworkInfluence by rememberUpdatedState(waveArtworkInfluence)
+        val currentArtworkGrid by rememberUpdatedState(artworkColorGrid)
+        val currentPlayState by rememberUpdatedState(playState)
 
         LaunchedEffect(fluidBgEnabled) {
             if (fluidBgEnabled) {
@@ -307,11 +216,25 @@ fun AcousticApp(
                         val speed = currentWaveSpeed
                         val roughness = currentWaveRoughness
                         val colorStyle = currentWaveColorStyle
+                        val artworkInfluence = currentArtworkInfluence
 
                         elapsedPassiveTime += diffSeconds * speed
 
                         val dt = diffSeconds * 0.95f
                         val time = elapsedPassiveTime
+                        
+                        // Calculate pulse from music beat
+                        val playStateLocal = currentPlayState
+                        var beatEnergy = 0f
+                        if (playStateLocal.isPlaying && playStateLocal.currentSong != null) {
+                            beatEnergy = playStateLocal.audioEnergy * speed * roughness * 2.5f // amplify
+                            
+                            // Inject beat energy to center-bottom of screen (like a subwoofer)
+                            if (playStateLocal.audioEnergy > 0.4f) { // Only poke on loud bits
+                                val amount = beatEnergy * 25f
+                                fluidSim.addVelocity(1440 / 2, 3168 - 400, (java.lang.Math.random().toFloat() - 0.5f) * amount, -amount * 2f, 8)
+                            }
+                        }
 
                         // Precalculate horizontal (column-wise) rough wave components with high frequency octaves
                         val colWaveU = FloatArray(fluidSim.simNX + 1)
@@ -321,24 +244,24 @@ fun AcousticApp(
                         for (i in 1..fluidSim.simNX) {
                             val progressX = i.toFloat() / fluidSim.simNX
                             val arg1 = progressX * 6.28f
-                            // Multi-octave wave superposition for ultra-fine choppy sea texture
-                            val wave1 = kotlin.math.sin((arg1 * 2.8f + time * 2.2f).toDouble()).toFloat()
-                            val wave2 = kotlin.math.cos((arg1 * 7.5f - time * 3.5f).toDouble()).toFloat() * 0.42f * roughness
-                            val wave3 = kotlin.math.sin((arg1 * 16.0f + time * 5.5f).toDouble()).toFloat() * 0.22f * roughness
-                            val wave4 = kotlin.math.cos((arg1 * 36.0f - time * 8.5f).toDouble()).toFloat() * 0.11f * roughness
+                            // Multi-octave wave superposition for deep smooth sea texture
+                            val wave1 = kotlin.math.sin((arg1 * 1.8f + time * 1.2f).toDouble()).toFloat()
+                            val wave2 = kotlin.math.cos((arg1 * 3.5f - time * 1.5f).toDouble()).toFloat() * 0.32f * roughness
+                            val wave3 = kotlin.math.sin((arg1 * 6.0f + time * 2.5f).toDouble()).toFloat() * 0.12f * roughness
+                            val wave4 = kotlin.math.cos((arg1 * 12.0f - time * 4.5f).toDouble()).toFloat() * 0.05f * roughness
                             colWaveU[i] = wave1 + wave2 + wave3 + wave4
 
-                            val waveV1 = kotlin.math.cos((arg1 * 2.5f - time * 1.8f).toDouble()).toFloat()
-                            val waveV2 = kotlin.math.sin((arg1 * 8.2f + time * 3.2f).toDouble()).toFloat() * 0.45f * roughness
-                            val waveV3 = kotlin.math.cos((arg1 * 19.0f - time * 4.8f).toDouble()).toFloat() * 0.2f * roughness
-                            val waveV4 = kotlin.math.sin((arg1 * 42.0f + time * 8.0f).toDouble()).toFloat() * 0.1f * roughness
+                            val waveV1 = kotlin.math.cos((arg1 * 1.5f - time * 1.4f).toDouble()).toFloat()
+                            val waveV2 = kotlin.math.sin((arg1 * 4.2f + time * 1.2f).toDouble()).toFloat() * 0.35f * roughness
+                            val waveV3 = kotlin.math.cos((arg1 * 9.0f - time * 2.8f).toDouble()).toFloat() * 0.15f * roughness
+                            val waveV4 = kotlin.math.sin((arg1 * 16.0f + time * 4.0f).toDouble()).toFloat() * 0.06f * roughness
                             colWaveV[i] = waveV1 + waveV2 + waveV3 + waveV4
 
-                            // Intense multi-frequency color interference coordinates
-                            colWaveColor[i] = (kotlin.math.sin((arg1 * 3.8f + time * 1.6f).toDouble()).toFloat() +
-                                              kotlin.math.cos((arg1 * 12.0f - time * 3.0f).toDouble()).toFloat() * 0.38f * roughness +
-                                              kotlin.math.sin((arg1 * 28.0f + time * 4.6f).toDouble()).toFloat() * 0.2f * roughness +
-                                              kotlin.math.cos((arg1 * 56.0f - time * 7.5f).toDouble()).toFloat() * 0.1f * roughness)
+                            // Smooth multi-frequency color interference coordinates
+                            colWaveColor[i] = (kotlin.math.sin((arg1 * 2.5f + time * 0.8f).toDouble()).toFloat() +
+                                              kotlin.math.cos((arg1 * 5.0f - time * 1.2f).toDouble()).toFloat() * 0.28f * roughness +
+                                              kotlin.math.sin((arg1 * 10.0f + time * 2.6f).toDouble()).toFloat() * 0.15f * roughness +
+                                              kotlin.math.cos((arg1 * 18.0f - time * 4.5f).toDouble()).toFloat() * 0.05f * roughness)
                         }
 
                         // Precalculate vertical (row-wise) rough wave components with high frequency octaves
@@ -348,56 +271,63 @@ fun AcousticApp(
                         for (j in 1..fluidSim.simNY) {
                             val progressY = j.toFloat() / fluidSim.simNY
                             val arg2 = progressY * 6.28f
-                            val wave1 = kotlin.math.cos((arg2 * 2.2f - time * 1.6f).toDouble()).toFloat()
-                            val wave2 = kotlin.math.sin((arg2 * 6.4f + time * 2.8f).toDouble()).toFloat() * 0.45f * roughness
-                            val wave3 = kotlin.math.cos((arg2 * 14.5f - time * 4.2f).toDouble()).toFloat() * 0.22f * roughness
-                            val wave4 = kotlin.math.sin((arg2 * 32.0f + time * 6.8f).toDouble()).toFloat() * 0.11f * roughness
+                            val wave1 = kotlin.math.cos((arg2 * 1.5f - time * 1.2f).toDouble()).toFloat()
+                            val wave2 = kotlin.math.sin((arg2 * 3.4f + time * 1.8f).toDouble()).toFloat() * 0.35f * roughness
+                            val wave3 = kotlin.math.cos((arg2 * 7.5f - time * 2.2f).toDouble()).toFloat() * 0.15f * roughness
+                            val wave4 = kotlin.math.sin((arg2 * 14.0f + time * 3.8f).toDouble()).toFloat() * 0.05f * roughness
                             rowWaveU[j] = wave1 + wave2 + wave3 + wave4
 
-                            val waveV1 = kotlin.math.sin((arg2 * 3.0f + time * 2.0f).toDouble()).toFloat()
-                            val waveV2 = kotlin.math.cos((arg2 * 8.5f - time * 3.4f).toDouble()).toFloat() * 0.48f * roughness
-                            val waveV3 = kotlin.math.sin((arg2 * 21.0f + time * 5.0f).toDouble()).toFloat() * 0.22f * roughness
-                            val waveV4 = kotlin.math.cos((arg2 * 48.0f - time * 7.6f).toDouble()).toFloat() * 0.1f * roughness
+                            val waveV1 = kotlin.math.sin((arg2 * 2.0f + time * 1.5f).toDouble()).toFloat()
+                            val waveV2 = kotlin.math.cos((arg2 * 4.5f - time * 2.4f).toDouble()).toFloat() * 0.38f * roughness
+                            val waveV3 = kotlin.math.sin((arg2 * 9.0f + time * 3.0f).toDouble()).toFloat() * 0.18f * roughness
+                            val waveV4 = kotlin.math.cos((arg2 * 20.0f - time * 4.6f).toDouble()).toFloat() * 0.06f * roughness
                             rowWaveV[j] = waveV1 + waveV2 + waveV3 + waveV4
 
-                            // Choppy vertical contrast profiles
-                            rowWaveColor[j] = (kotlin.math.sin((arg2 * 3.0f + time * 1.2f).toDouble()).toFloat() +
-                                              kotlin.math.cos((arg2 * 10.5f - time * 2.6f).toDouble()).toFloat() * 0.4f * roughness +
-                                              kotlin.math.sin((arg2 * 24.0f + time * 4.0f).toDouble()).toFloat() * 0.2f * roughness +
-                                              kotlin.math.cos((arg2 * 52.0f - time * 6.5f).toDouble()).toFloat() * 0.12f * roughness)
+                            // Smooth vertical contrast profiles
+                            rowWaveColor[j] = (kotlin.math.sin((arg2 * 2.0f + time * 1.0f).toDouble()).toFloat() +
+                                              kotlin.math.cos((arg2 * 5.5f - time * 1.6f).toDouble()).toFloat() * 0.35f * roughness +
+                                              kotlin.math.sin((arg2 * 12.0f + time * 2.4f).toDouble()).toFloat() * 0.15f * roughness +
+                                              kotlin.math.cos((arg2 * 25.0f - time * 4.0f).toDouble()).toFloat() * 0.05f * roughness)
                         }
 
                         // Determine base theme colors dynamically or override based on user preference preset
-                        val rBase: Float
-                        val gBase: Float
-                        val bBase: Float
-                        when (colorStyle) {
-                            "Deep Sea Navy" -> {
-                                rBase = 10f
-                                gBase = 85f + 15f * kotlin.math.sin(time * 0.4f).toFloat()
-                                bBase = 195f
+                        var rDef: Float = 0f
+                        var gDef: Float = 0f
+                        var bDef: Float = 0f
+                        val isDynamic = colorStyle == "Dynamic Track" || colorStyle !in listOf("Deep Sea Navy", "Midnight Violet", "Toxic Emerald", "Cyber Sunset")
+                        
+                        if (!isDynamic) {
+                            when (colorStyle) {
+                                "Deep Sea Navy" -> {
+                                    rDef = 10f
+                                    gDef = 85f + 15f * kotlin.math.sin(time * 0.4f).toFloat()
+                                    bDef = 195f
+                                }
+                                "Midnight Violet" -> {
+                                    rDef = 165f
+                                    gDef = 25f + 10f * kotlin.math.cos(time * 0.5f).toFloat()
+                                    bDef = 185f
+                                }
+                                "Toxic Emerald" -> {
+                                    rDef = 20f
+                                    gDef = 215f
+                                    bDef = 75f + 25f * kotlin.math.sin(time * 0.3f).toFloat()
+                                }
+                                "Cyber Sunset" -> {
+                                    rDef = 225f
+                                    gDef = 80f + 20f * kotlin.math.cos(time * 0.35f).toFloat()
+                                    bDef = 10f
+                                }
                             }
-                            "Midnight Violet" -> {
-                                rBase = 165f
-                                gBase = 25f + 10f * kotlin.math.cos(time * 0.5f).toFloat()
-                                bBase = 185f
-                            }
-                            "Toxic Emerald" -> {
-                                rBase = 20f
-                                gBase = 215f
-                                bBase = 75f + 25f * kotlin.math.sin(time * 0.3f).toFloat()
-                            }
-                            "Cyber Sunset" -> {
-                                rBase = 225f
-                                gBase = 80f + 20f * kotlin.math.cos(time * 0.35f).toFloat()
-                                bBase = 10f
-                            }
-                            else -> { // "Dynamic Track"
-                                rBase = (animatedTrackColor.red * 140f)
-                                gBase = (animatedColor2.green * 140f)
-                                bBase = (animatedColor3.blue * 140f)
-                            }
+                        } else {
+                            rDef = (animatedTrackColor.red * 140f)
+                            gDef = (animatedColor2.green * 140f)
+                            bDef = (animatedColor3.blue * 140f)
                         }
+
+                        val gridData = currentArtworkGrid
+                        val artworkYStart = (fluidSim.simNY - fluidSim.simNX) / 2
+                        val artworkYEnd = artworkYStart + fluidSim.simNX
 
                         // Populate grid combining row and column components to form non-uniform turbulent interference patterns
                         for (j in 1..fluidSim.simNY) {
@@ -408,6 +338,36 @@ fun AcousticApp(
 
                             for (i in 1..fluidSim.simNX) {
                                 val idx = i + rowOffset
+                                
+                                var rBase = rDef
+                                var gBase = gDef
+                                var bBase = bDef
+                                
+                                if (isDynamic && gridData != null) {
+                                    val mappedX = ((i - 1).toFloat() / fluidSim.simNX * 63f).toInt().coerceIn(0, 63)
+                                    val mappedXFinal: Int
+                                    val mappedYFinal: Int
+                                    
+                                    if (j in artworkYStart until artworkYEnd) {
+                                        mappedYFinal = ((j - artworkYStart).toFloat() / fluidSim.simNX * 63f).toInt().coerceIn(0, 63)
+                                        mappedXFinal = mappedX
+                                    } else {
+                                        // Smooth tiled sampling from artwork for non-artwork areas
+                                        mappedXFinal = ((i * 2) % 64)
+                                        mappedYFinal = ((j * 2) % 64)
+                                    }
+                                    
+                                    val pixel = gridData[mappedYFinal * 64 + mappedXFinal]
+                                    val artR = android.graphics.Color.red(pixel).toFloat() * 1.25f
+                                    val artG = android.graphics.Color.green(pixel).toFloat() * 1.25f
+                                    val artB = android.graphics.Color.blue(pixel).toFloat() * 1.25f
+                                    
+                                    // Use a non-linear scaling curve to make the artwork pop more vividly
+                                    val boostedInfluence = kotlin.math.min(1.0f, artworkInfluence * 1.8f)
+                                    rBase = rDef * (1f - boostedInfluence) + artR * boostedInfluence
+                                    gBase = gDef * (1f - boostedInfluence) + artG * boostedInfluence
+                                    bBase = bDef * (1f - boostedInfluence) + artB * boostedInfluence
+                                }
                                 
                                 // Multiply and add the vertical and horizontal frequencies to create extremely detailed choppy crests/troughs
                                 val cx = colWaveColor[i]
@@ -423,8 +383,8 @@ fun AcousticApp(
                                 val uWaveCurrent = uy + ux + uy * ux * 0.5f
                                 val vWaveCurrent = vy + vx + vy * vx * 0.5f
 
-                                fluidSim.u[idx] += uWaveCurrent * 2.4f
-                                fluidSim.v[idx] += vWaveCurrent * 2.4f
+                                fluidSim.u[idx] += uWaveCurrent * 0.6f * speed
+                                fluidSim.v[idx] += vWaveCurrent * 0.6f * speed
                                 
                                 val rVal = fluidSim.rPrev[idx] * 0.91f + rWave * 0.09f
                                 fluidSim.r[idx] = if (rVal < 0f) 0f else if (rVal > 255f) 255f else rVal
@@ -491,10 +451,6 @@ fun AcousticApp(
                                                 c.blue * 1400f,
                                                 radius = 15
                                             )
-                                        } else {
-                                            val normX = (currentX / w).coerceIn(0f, 1f)
-                                            val force = if (kotlin.math.abs(dx) > 0.5f) 180f else 60f
-                                            applyTouchForce(normX, force)
                                         }
                                     }
                                 }
@@ -555,91 +511,6 @@ fun AcousticApp(
                             filterQuality = FilterQuality.Medium
                         )
                     }
-                } else {
-                    androidx.compose.foundation.Canvas(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(playState.bgWaveOpacity)
-                    ) {
-                        val drawTick = tick1D
-                        val width = size.width
-                        val height = size.height
-
-                        val baseLine1 = height * 0.40f
-                        val baseLine2 = height * 0.55f
-                        val baseLine3 = height * 0.70f
-
-                        val path1 = androidx.compose.ui.graphics.Path()
-                        val path2 = androidx.compose.ui.graphics.Path()
-                        val path3 = androidx.compose.ui.graphics.Path()
-
-                        path1.moveTo(0f, height)
-                        path1.lineTo(0f, baseLine1)
-
-                        path2.moveTo(0f, height)
-                        path2.lineTo(0f, baseLine2)
-
-                        path3.moveTo(0f, height)
-                        path3.lineTo(0f, baseLine3)
-
-                        for (xIndex in 0..steps) {
-                            val x = (width / steps) * xIndex
-                            val progress = xIndex.toFloat() / steps
-
-                            val physH1 = waveH1[xIndex]
-                            val physH2 = waveH2[xIndex]
-                            val physH3 = waveH3[xIndex]
-
-                            val y1 = baseLine1 - physH1 + 35.dp.toPx() * Math.sin((progress * 2.0 * Math.PI + waveTime).toDouble()).toFloat()
-                            val y2 = baseLine2 + physH2 + 45.dp.toPx() * Math.sin((progress * 1.5 * Math.PI - waveTime * 1.3).toDouble()).toFloat()
-                            val y3 = baseLine3 - physH3 + 55.dp.toPx() * Math.cos((progress * 2.5 * Math.PI + waveTime * 0.8).toDouble()).toFloat()
-
-                            if (xIndex == 0) {
-                                path1.lineTo(x, y1)
-                                path2.lineTo(x, y2)
-                                path3.lineTo(x, y3)
-                            } else {
-                                path1.quadraticTo(x - (width / steps) / 2f, y1, x, y1)
-                                path2.quadraticTo(x - (width / steps) / 2f, y2, x, y2)
-                                path3.quadraticTo(x - (width / steps) / 2f, y3, x, y3)
-                            }
-                        }
-
-                        path1.lineTo(width, height)
-                        path2.lineTo(width, height)
-                        path3.lineTo(width, height)
-
-                        path1.close()
-                        path2.close()
-                        path3.close()
-
-                        drawPath(
-                            path = path3,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedColor3.copy(alpha = 0.45f), Color.Transparent),
-                                startY = baseLine3 - 50.dp.toPx(),
-                                endY = height
-                            )
-                        )
-
-                        drawPath(
-                            path = path2,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedColor2.copy(alpha = 0.35f), Color.Transparent),
-                                startY = baseLine2 - 40.dp.toPx(),
-                                endY = height
-                            )
-                        )
-
-                        drawPath(
-                            path = path1,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedTrackColor.copy(alpha = 0.25f), Color.Transparent),
-                                startY = baseLine1 - 30.dp.toPx(),
-                                endY = height
-                            )
-                        )
-                    }
                 }
             }
 
@@ -695,6 +566,8 @@ fun AcousticApp(
                         currentSong = playState.currentSong,
                         isPlaying = playState.isPlaying,
                         playbackProgress = playState.progress,
+                        audioEnergy = playState.audioEnergy,
+                        audioWaveform = playState.audioWaveform,
                         sortOrder = sortOrder,
                         onSortOrderChange = { viewModel.setSortOrder(it) },
                         onSongSelected = { song -> viewModel.playSong(song, songs) },
@@ -714,7 +587,12 @@ fun AcousticApp(
                                 systemLauncher.launch(scanPermission)
                             }
                         },
-                        onPlayNext = { viewModel.playNext(it) }
+                        onPlayNext = { viewModel.playNext(it) },
+                        onShuffleAll = {
+                            if (songs.isNotEmpty()) {
+                                viewModel.shuffleAndPlay(songs)
+                            }
+                        }
                     )
                 }
                 "Playlists" -> {
@@ -725,6 +603,8 @@ fun AcousticApp(
                         currentSong = playState.currentSong,
                         isPlaying = playState.isPlaying,
                         playbackProgress = playState.progress,
+                        audioEnergy = playState.audioEnergy,
+                        audioWaveform = playState.audioWaveform,
                         onCreatePlaylist = { showCreatePlaylistDialog = true },
                         onSelectPlaylist = { viewModel.selectPlaylist(it) },
                         onDeletePlaylist = { viewModel.deletePlaylist(it) },
@@ -738,6 +618,8 @@ fun AcousticApp(
                         currentSong = playState.currentSong,
                         isPlaying = playState.isPlaying,
                         playbackProgress = playState.progress,
+                        audioEnergy = playState.audioEnergy,
+                        audioWaveform = playState.audioWaveform,
                         onSongSelected = { song -> viewModel.playSong(song, favorites) },
                         onToggleFavorite = { viewModel.toggleFavorite(it) },
                         onAddToPlaylist = {
@@ -762,11 +644,15 @@ fun AcousticApp(
                         },
                         fluidBgEnabled = fluidBgEnabled,
                         onFluidBgToggled = { viewModel.setFluidBgEnabled(it) },
+                        introAnimationEnabled = introAnimationEnabled,
+                        onIntroAnimationToggled = { viewModel.setIntroAnimationEnabled(it) },
                         waveSpeed = waveSpeed,
                         waveRoughness = waveRoughness,
+                        waveArtworkInfluence = waveArtworkInfluence,
                         waveColorStyle = waveColorStyle,
                         onWaveSpeedChanged = { viewModel.setWaveSpeed(it) },
                         onWaveRoughnessChanged = { viewModel.setWaveRoughness(it) },
+                        onWaveArtworkInfluenceChanged = { viewModel.setWaveArtworkInfluence(it) },
                         onWaveColorStyleChanged = { viewModel.setWaveColorStyle(it) }
                     )
                 }
@@ -850,10 +736,88 @@ fun AcousticApp(
                     }
                 )
             }
+            // App launch animation overlay
+            if (introAnimationEnabled) {
+                WarpDriveIntro()
+            }
         }
     }
 }
 }
+}
+
+// --- WarpDrive Intro Composable ---
+@Composable
+fun WarpDriveIntro() {
+    var isVisible by remember { mutableStateOf(true) }
+    
+    // Scale from small to large
+    val scale = remember { androidx.compose.animation.core.Animatable(0.5f) }
+    // Fade out at the end
+    val alpha = remember { androidx.compose.animation.core.Animatable(1f) }
+    val rotation = remember { androidx.compose.animation.core.Animatable(0f) }
+
+    LaunchedEffect(Unit) {
+        // Warp drive duration
+        launch {
+            scale.animateTo(
+                targetValue = 10f,
+                animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing)
+            )
+        }
+        launch {
+            rotation.animateTo(
+                targetValue = 360f,
+                animationSpec = tween(durationMillis = 1200, easing = LinearEasing)
+            )
+        }
+        kotlinx.coroutines.delay(1000)
+        launch {
+            alpha.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 300)
+            )
+        }
+        isVisible = false
+    }
+
+    if (isVisible) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(CosmicDarkBg.copy(alpha = alpha.value))
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { isVisible = false }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier
+                .fillMaxSize()
+                .scale(scale.value)
+                .rotate(rotation.value)
+                .alpha(alpha.value)
+            ) {
+                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                val maxRadius = size.width
+                
+                for (i in 0 until 50) {
+                    val radius = maxRadius * (i / 50f)
+                    val strokeWidth = 4f + (i * 0.5f)
+                    
+                    val color = Color.hsv(hue = (i * 15f) % 360f, saturation = 0.9f, value = 0.9f)
+                    
+                    drawCircle(
+                        color = color,
+                        center = center,
+                        radius = radius,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
+                    )
+                }
+            }
+        }
+    }
 }
 
 // --- Composite UI Tab Switcher Navigation ---
@@ -915,6 +879,8 @@ fun SongsDashboard(
     currentSong: Song?,
     isPlaying: Boolean,
     playbackProgress: Long = 0L,
+    audioEnergy: Float = 0f,
+    audioWaveform: IntArray? = null,
     sortOrder: SongSortOrder,
     onSortOrderChange: (SongSortOrder) -> Unit,
     onSongSelected: (Song) -> Unit,
@@ -924,7 +890,8 @@ fun SongsDashboard(
     onLaunchPicker: () -> Unit,
     onLaunchFolderPicker: () -> Unit,
     onTriggerScan: () -> Unit,
-    onPlayNext: (Song) -> Unit
+    onPlayNext: (Song) -> Unit,
+    onShuffleAll: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -964,7 +931,9 @@ fun SongsDashboard(
                     gapFraction = 0.22f,
                     songId = currentSong?.id ?: 0L,
                     songTitle = currentSong?.title ?: "",
-                    playbackProgress = playbackProgress
+                    playbackProgress = playbackProgress,
+                    audioEnergy = audioEnergy,
+                    audioWaveform = audioWaveform
                 )
             }
 
@@ -1037,12 +1006,30 @@ fun SongsDashboard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 item {
+                    Button(
+                        onClick = onShuffleAll,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyberEmerald),
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(end = 4.dp).height(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = "Shuffle All",
+                            tint = CosmicDarkBg,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Shuffle All", fontSize = 12.sp, color = CosmicDarkBg, fontWeight = FontWeight.Bold)
+                    }
+                }
+                item {
                     Text(
                         text = "Sort:",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 4.dp)
+                        modifier = Modifier.padding(start = 4.dp, end = 4.dp)
                     )
                 }
                 items(SongSortOrder.values()) { order ->
@@ -1157,19 +1144,46 @@ fun SongsDashboard(
                     .testTag("songs_list")
             ) {
                 items(songs, key = { it.id }) { song ->
-                    SongTrackItemCard(
-                        song = song,
-                        isActive = currentSong?.id == song.id,
-                        isPlaying = isPlaying,
-                        onClick = { onSongSelected(song) },
-                        onToggleFavorite = { onToggleFavorite(song) },
-                        onAddToPlaylist = { onAddToPlaylist(song) },
-                        onDeleteSong = { onDeleteSong(song) },
-                        onPlayNext = {
-                            onPlayNext(song)
-                            android.widget.Toast.makeText(context, "Added '${song.title}' to play next", android.widget.Toast.LENGTH_SHORT).show()
+                    // Animated reveal effect
+                    val scale = remember { androidx.compose.animation.core.Animatable(0.8f) }
+                    val alpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                    
+                    LaunchedEffect(song.id) {
+                        launch {
+                            scale.animateTo(
+                                targetValue = 1f,
+                                animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)
+                            )
                         }
-                    )
+                        launch {
+                            alpha.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 250)
+                            )
+                        }
+                    }
+
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .scale(scale.value)
+                        .alpha(alpha.value)
+                        .animateItem()
+                    ) {
+                        SongTrackItemCard(
+                            song = song,
+                            isActive = currentSong?.id == song.id,
+                            isPlaying = isPlaying,
+                            audioWaveform = audioWaveform,
+                            onClick = { onSongSelected(song) },
+                            onToggleFavorite = { onToggleFavorite(song) },
+                            onAddToPlaylist = { onAddToPlaylist(song) },
+                            onDeleteSong = { onDeleteSong(song) },
+                            onPlayNext = {
+                                onPlayNext(song)
+                                android.widget.Toast.makeText(context, "Added '${song.title}' to play next", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1196,9 +1210,62 @@ fun PlayingVisualizer(
     gapFraction: Float = 0.35f,
     songId: Long = 0L,
     songTitle: String = "",
-    playbackProgress: Long = 0L
+    playbackProgress: Long = 0L,
+    audioEnergy: Float = 0f,
+    audioWaveform: IntArray? = null
 ) {
-    // Columns are completely disabled per user feedback
+    val animatedHeights = mutableListOf<Float>()
+    for (i in 0 until barCount) {
+        var targetHeight = 0.2f
+        if (isPlaying) {
+            if (audioWaveform != null && audioWaveform.size >= barCount) {
+                val index = ((i.toFloat() / barCount) * audioWaveform.size).toInt().coerceIn(0, audioWaveform.size - 1)
+                val sample = kotlin.math.abs(audioWaveform[index])
+                val amplitude = sample / 128f
+                targetHeight = (0.2f + amplitude * 1.5f).coerceIn(0.1f, 1.0f)
+            } else {
+                val bpmSeed = kotlin.math.abs(songId * 31 + songTitle.hashCode())
+                val bpm = 90 + ((bpmSeed % 80).toFloat())
+                val msPerBeat = (60000f / bpm)
+                val beatPhase = ((playbackProgress % msPerBeat) / msPerBeat).toFloat()
+                val beatEnergy = kotlin.math.max(0.0f, 1.0f - beatPhase * 1.5f)
+
+                val offsetSeed = (bpmSeed + i * 179).toFloat()
+                val individualPhase = ((playbackProgress * 0.001f * (1f + (offsetSeed % 5) * 0.2f)) % 6.28f)
+                
+                val wave = (kotlin.math.sin(individualPhase.toDouble()).toFloat() + 1f) * 0.5f
+                val bassImpact = if (i < barCount / 3) beatEnergy * 0.8f else beatEnergy * 0.3f
+                targetHeight = (0.3f + wave * 0.3f + bassImpact).coerceIn(0.1f, 1.0f)
+            }
+        }
+        val animatedH by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = targetHeight,
+            animationSpec = androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
+            label = "bar_$i"
+        )
+        animatedHeights.add(animatedH)
+    }
+
+    Canvas(modifier = modifier) {
+        val totalWidth = size.width
+        val barWidth = totalWidth / (barCount + (barCount - 1) * gapFraction)
+        val gapWidth = barWidth * gapFraction
+
+        for (i in 0 until barCount) {
+            val heightFactor = animatedHeights[i]
+            
+            val barHeight = size.height * heightFactor
+            val left = i * (barWidth + gapWidth)
+            val top = size.height - barHeight
+                
+            drawRoundRect(
+                color = color,
+                topLeft = androidx.compose.ui.geometry.Offset(left, top),
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f)
+            )
+        }
+    }
 }
 
 // --- Composite Specific Song Item Card Layout ---
@@ -1208,6 +1275,7 @@ fun SongTrackItemCard(
     song: Song,
     isActive: Boolean,
     isPlaying: Boolean = false,
+    audioWaveform: IntArray? = null,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
@@ -1220,26 +1288,73 @@ fun SongTrackItemCard(
     val blendedSurface = lerpColor(CosmicSurface, trackColor, 0.08f)
     val blendedActive = lerpColor(CosmicSurfaceValue, trackColor, 0.22f)
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .onSwipeGesture(
-                onSwipeRight = { onPlayNext?.invoke() }
-            )
-            .testTag("song_card_${song.id}"),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = (if (isActive) blendedActive else blendedSurface).copy(alpha = 0.60f)
-        ),
-        border = if (isActive) {
-            val trackColors = LocalTrackColors.current
-            BorderStroke(
-                width = 1.3.dp,
-                brush = Brush.horizontalGradient(trackColors)
-            )
-        } else null
+    val offsetX = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+
+    Box(
+        modifier = Modifier.fillMaxWidth()
     ) {
+        // Background revealed upon swipe right
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clip(RoundedCornerShape(12.dp))
+                .background(CosmicSurfaceValue.copy(alpha = 0.5f))
+                .padding(start = 24.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Icon(
+                imageVector = Icons.Default.Queue,
+                contentDescription = "Add to queue",
+                tint = trackColor,
+                modifier = Modifier.size(28.dp).scale(minOf(1f, offsetX.value / 100f))
+            )
+        }
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { androidx.compose.ui.unit.IntOffset(offsetX.value.toInt(), 0) }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            scope.launch {
+                                if (offsetX.value > 120f) {
+                                    onPlayNext?.invoke()
+                                }
+                                offsetX.animateTo(0f, androidx.compose.animation.core.spring(
+                                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy
+                                ))
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch {
+                                offsetX.animateTo(0f)
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount: Float ->
+                            if (dragAmount > 0f || offsetX.value > 0f) {
+                                scope.launch {
+                                    offsetX.snapTo((offsetX.value + dragAmount * 0.6f).coerceIn(0f, 250f))
+                                }
+                            }
+                        }
+                    )
+                }
+                .clickable { onClick() }
+                .testTag("song_card_${song.id}"),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = (if (isActive) blendedActive else blendedSurface).copy(alpha = 0.60f)
+            ),
+            border = if (isActive) {
+                val trackColors = LocalTrackColors.current
+                BorderStroke(
+                    width = 1.3.dp,
+                    brush = Brush.horizontalGradient(trackColors)
+                )
+            } else null
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1303,7 +1418,8 @@ fun SongTrackItemCard(
                             modifier = Modifier.size(20.dp, 12.dp),
                             barCount = 4,
                             songId = song.id,
-                            songTitle = song.title
+                            songTitle = song.title,
+                            audioWaveform = audioWaveform
                         )
                     }
                 }
@@ -1385,6 +1501,7 @@ fun SongTrackItemCard(
             }
         }
     }
+    }
 }
 
 // --- Playlists Dashboard Tab ---
@@ -1397,6 +1514,8 @@ fun PlaylistsDashboard(
     currentSong: Song?,
     isPlaying: Boolean,
     playbackProgress: Long = 0L,
+    audioEnergy: Float = 0f,
+    audioWaveform: IntArray? = null,
     onCreatePlaylist: () -> Unit,
     onSelectPlaylist: (Long?) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
@@ -1437,7 +1556,9 @@ fun PlaylistsDashboard(
                         gapFraction = 0.25f,
                         songId = currentSong?.id ?: 0L,
                         songTitle = currentSong?.title ?: "",
-                        playbackProgress = playbackProgress
+                        playbackProgress = playbackProgress,
+                        audioEnergy = audioEnergy,
+                        audioWaveform = audioWaveform
                     )
                 }
 
@@ -1497,60 +1618,80 @@ fun PlaylistsDashboard(
                         .testTag("playlists_list")
                 ) {
                     items(playlists, key = { it.id }) { playlist ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectPlaylist(playlist.id) }
-                                .testTag("playlist_card_${playlist.id}"),
-                            colors = CardDefaults.cardColors(containerColor = CosmicSurface.copy(alpha = 0.60f)),
-                            shape = RoundedCornerShape(12.dp)
+                        // Scrolling entrance effect
+                        val scale = remember { androidx.compose.animation.core.Animatable(0.85f) }
+                        val alpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                        
+                        LaunchedEffect(playlist.id) {
+                            launch {
+                                scale.animateTo(1f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f))
+                            }
+                            launch {
+                                alpha.animateTo(1f, animationSpec = tween(300))
+                            }
+                        }
+
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .scale(scale.value)
+                            .alpha(alpha.value)
+                            .animateItem()
                         ) {
-                            Row(
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .clickable { onSelectPlaylist(playlist.id) }
+                                    .testTag("playlist_card_${playlist.id}"),
+                                colors = CardDefaults.cardColors(containerColor = CosmicSurface.copy(alpha = 0.60f)),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(CosmicSurfaceValue),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.LibraryMusic,
-                                        contentDescription = null,
-                                        tint = CyberEmerald
-                                    )
-                                }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(CosmicSurfaceValue),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LibraryMusic,
+                                            contentDescription = null,
+                                            tint = CyberEmerald
+                                        )
+                                    }
 
-                                Spacer(modifier = Modifier.width(16.dp))
+                                    Spacer(modifier = Modifier.width(16.dp))
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = playlist.name,
-                                        color = TextPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
-                                    Text(
-                                        text = "Custom User Playlist",
-                                        color = TextSecondary,
-                                        fontSize = 12.sp
-                                    )
-                                }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = playlist.name,
+                                            color = TextPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        )
+                                        Text(
+                                            text = "Custom User Playlist",
+                                            color = TextSecondary,
+                                            fontSize = 12.sp
+                                        )
+                                    }
 
-                                IconButton(
-                                    onClick = { onDeletePlaylist(playlist.id) },
-                                    modifier = Modifier.testTag("delete_playlist_${playlist.id}")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete full custom playlist directory structure",
-                                        tint = TextMuted,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    IconButton(
+                                        onClick = { onDeletePlaylist(playlist.id) },
+                                        modifier = Modifier.testTag("delete_playlist_${playlist.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete full custom playlist directory structure",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1730,6 +1871,8 @@ fun FavoritesDashboard(
     currentSong: Song?,
     isPlaying: Boolean,
     playbackProgress: Long = 0L,
+    audioEnergy: Float = 0f,
+    audioWaveform: IntArray? = null,
     onSongSelected: (Song) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onAddToPlaylist: (Song) -> Unit,
@@ -1762,7 +1905,9 @@ fun FavoritesDashboard(
                 gapFraction = 0.25f,
                 songId = currentSong?.id ?: 0L,
                 songTitle = currentSong?.title ?: "",
-                playbackProgress = playbackProgress
+                playbackProgress = playbackProgress,
+                audioEnergy = audioEnergy,
+                audioWaveform = audioWaveform
             )
         }
 
@@ -1807,20 +1952,46 @@ fun FavoritesDashboard(
                     .testTag("favorites_list")
             ) {
                 items(songs, key = { it.id }) { song ->
-                    // Standard Track Card reusable block
-                    SongTrackItemCard(
-                        song = song,
-                        isActive = currentSong?.id == song.id,
-                        isPlaying = isPlaying,
-                        onClick = { onSongSelected(song) },
-                        onToggleFavorite = { onToggleFavorite(song) },
-                        onAddToPlaylist = { onAddToPlaylist(song) },
-                        onDeleteSong = {}, // disable full disk purging from favorites stream
-                        onPlayNext = {
-                            onPlayNext(song)
-                            android.widget.Toast.makeText(context, "Added '${song.title}' to play next", android.widget.Toast.LENGTH_SHORT).show()
+                    // Animated reveal effect
+                    val scale = remember { androidx.compose.animation.core.Animatable(0.8f) }
+                    val alpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                    
+                    LaunchedEffect(song.id) {
+                        launch {
+                            scale.animateTo(
+                                targetValue = 1f,
+                                animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f)
+                            )
                         }
-                    )
+                        launch {
+                            alpha.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(durationMillis = 250)
+                            )
+                        }
+                    }
+
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .scale(scale.value)
+                        .alpha(alpha.value)
+                        .animateItem()
+                    ) {
+                        SongTrackItemCard(
+                            song = song,
+                            isActive = currentSong?.id == song.id,
+                            isPlaying = isPlaying,
+                            audioWaveform = audioWaveform,
+                            onClick = { onSongSelected(song) },
+                            onToggleFavorite = { onToggleFavorite(song) },
+                            onAddToPlaylist = { onAddToPlaylist(song) },
+                            onDeleteSong = {}, // disable full disk purging from favorites stream
+                            onPlayNext = {
+                                onPlayNext(song)
+                                android.widget.Toast.makeText(context, "Added '${song.title}' to play next", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1840,11 +2011,15 @@ fun SettingsDashboard(
     onBackgroundContentScaleChanged: (String) -> Unit,
     fluidBgEnabled: Boolean,
     onFluidBgToggled: (Boolean) -> Unit,
+    introAnimationEnabled: Boolean,
+    onIntroAnimationToggled: (Boolean) -> Unit,
     waveSpeed: Float,
     waveRoughness: Float,
+    waveArtworkInfluence: Float,
     waveColorStyle: String,
     onWaveSpeedChanged: (Float) -> Unit,
     onWaveRoughnessChanged: (Float) -> Unit,
+    onWaveArtworkInfluenceChanged: (Float) -> Unit,
     onWaveColorStyleChanged: (String) -> Unit
 ) {
     Column(
@@ -2073,6 +2248,45 @@ fun SettingsDashboard(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(10.dp))
+                
+                // Intro Animation Toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onIntroAnimationToggled(!introAnimationEnabled) }
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Startup Warp Drive Intro",
+                            color = ElectricCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Play a cinematic space warp animation when launching the app.",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Switch(
+                        checked = introAnimationEnabled,
+                        onCheckedChange = onIntroAnimationToggled,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = CosmicDarkBg,
+                            checkedTrackColor = CyberEmerald,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = CosmicSurfaceValue
+                        ),
+                        modifier = Modifier.testTag("intro_anim_switch")
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Slider 4: Wave Opacity
@@ -2226,6 +2440,32 @@ fun SettingsDashboard(
                     ),
                     modifier = Modifier.testTag("wave_roughness_slider")
                 )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Slider for Wave Artwork Influence
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Artwork Color Dissolve: ${String.format("%.0f%%", waveArtworkInfluence * 100)}",
+                        color = ElectricCyan,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = waveArtworkInfluence,
+                    onValueChange = onWaveArtworkInfluenceChanged,
+                    valueRange = 0.0f..1.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = ElectricCyan,
+                        activeTrackColor = ElectricCyan,
+                        inactiveTrackColor = CosmicSurfaceValue
+                    ),
+                    modifier = Modifier.testTag("wave_artwork_influence_slider")
+                )
             }
         }
 
@@ -2359,7 +2599,9 @@ fun CollapsedMiniPlayer(
                             barCount = 6,
                             songId = currentSong.id,
                             songTitle = currentSong.title,
-                            playbackProgress = state.progress
+                            playbackProgress = state.progress,
+                            audioEnergy = state.audioEnergy,
+                            audioWaveform = state.audioWaveform
                         )
                     }
                     Text(
@@ -2417,6 +2659,78 @@ fun CollapsedMiniPlayer(
 }
 
 // --- Expanded Dynamic Full Visual Music Player Screen ---
+
+@Composable
+fun WaveformProgressBar(
+    progress: Float,
+    duration: Float,
+    onSeek: (Float) -> Unit,
+    activeColor: Color,
+    inactiveColor: Color,
+    modifier: Modifier = Modifier,
+    barCount: Int = 40,
+    seedId: Long = 0L
+) {
+    var dragProgress by remember { mutableStateOf<Float?>(null) }
+    
+    val currentProgress = dragProgress ?: progress
+    val progressMax = maxOf(duration, 1f)
+    val fraction = (currentProgress / progressMax).coerceIn(0f, 1f)
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val newFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                        dragProgress = newFraction * progressMax
+                    },
+                    onDragEnd = {
+                        dragProgress?.let { onSeek(it) }
+                        dragProgress = null
+                    },
+                    onDragCancel = { dragProgress = null },
+                    onDrag = { change, _ ->
+                        val newFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                        dragProgress = newFraction * progressMax
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { offset: androidx.compose.ui.geometry.Offset ->
+                        val newFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                        onSeek(newFraction * progressMax)
+                    }
+                )
+            }
+    ) {
+        val barWidth = size.width / (barCount * 1.5f)
+        val gap = barWidth * 0.5f
+        val centerY = size.height / 2f
+        
+        for (i in 0 until barCount) {
+            val isFilled = (i.toFloat() / barCount) <= fraction
+            val color = if (isFilled) activeColor else inactiveColor
+            
+            // Generate deterministic waveform based on seed
+            val random = kotlin.math.abs(kotlin.math.sin(((seedId + i) * 123.456).toFloat()))
+            val barHeight = size.height * 0.2f + (size.height * 0.8f * random)
+            
+            val x = i * (barWidth + gap)
+            val y = centerY - barHeight / 2f
+            
+            drawRoundRect(
+                color = color,
+                topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f)
+            )
+        }
+    }
+}
 
 @Composable
 fun FullMusicPlayerSheet(
@@ -2695,7 +3009,9 @@ fun FullMusicPlayerSheet(
                     barCount = 32,
                     songId = currentSong.id,
                     songTitle = currentSong.title,
-                    playbackProgress = state.progress
+                    playbackProgress = state.progress,
+                    audioEnergy = state.audioEnergy,
+                    audioWaveform = state.audioWaveform
                 )
             }
 
@@ -2714,24 +3030,20 @@ fun FullMusicPlayerSheet(
                 val currentProgress = sliderDraggingValue ?: state.progress.toFloat()
                 val progressMax = maxOf(state.duration.toFloat(), 1f)
 
-                Slider(
-                    value = currentProgress.coerceIn(0f, progressMax),
-                    onValueChange = { sliderDraggingValue = it },
-                    onValueChangeFinished = {
-                        sliderDraggingValue?.let {
-                            onSeek(it.toLong())
-                        }
+                WaveformProgressBar(
+                    progress = currentProgress,
+                    duration = progressMax,
+                    onSeek = { 
+                        sliderDraggingValue = it
+                        onSeek(it.toLong()) 
                         sliderDraggingValue = null
                     },
-                    valueRange = 0f..progressMax,
-                    colors = SliderDefaults.colors(
-                        thumbColor = CyberEmerald,
-                        activeTrackColor = CyberEmerald,
-                        inactiveTrackColor = CosmicSurfaceValue
-                    ),
+                    activeColor = animatedTrackColor,
+                    inactiveColor = CosmicSurfaceValue,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("track_progress_slider")
+                        .testTag("track_progress_slider"),
+                    seedId = currentSong.id
                 )
 
                 Row(
@@ -3062,7 +3374,9 @@ fun QueuePlayerSheet(
                                         barCount = 5,
                                         songId = currentSong.id,
                                         songTitle = currentSong.title,
-                                        playbackProgress = state.progress
+                                        playbackProgress = state.progress,
+                                        audioEnergy = state.audioEnergy,
+                                        audioWaveform = state.audioWaveform
                                     )
                                 }
                             }
@@ -3442,8 +3756,8 @@ fun formatDuration(durationMs: Long): String {
 
 class FluidSimulation(val NX: Int = 1440, val NY: Int = 3168) {
     // Highly optimized internal grid dimension exactly matching the 1440:3168 aspect ratio
-    val simNX = 273
-    val simNY = 600
+    val simNX = 90
+    val simNY = 198
     val size = (simNX + 2) * (simNY + 2)
     
     val u = FloatArray(size)
