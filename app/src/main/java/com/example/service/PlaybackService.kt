@@ -56,7 +56,7 @@ class PlaybackService : Service(), AudioManager.OnAudioFocusChangeListener {
     private var bgBlurRadius = 10f
     private var bgAlpha = 0.24f
     private var bgScale = 2.4f
-    private var bgWaveOpacity = 0.85f
+    private var bgWaveOpacity = 0.35f
     private var bgContentScale = "Crop"
 
     // Crossfade helper state

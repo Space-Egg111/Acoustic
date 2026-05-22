@@ -23,7 +23,6 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.viewmodel.SongSortOrder
 import androidx.compose.foundation.shape.CircleShape
@@ -53,18 +52,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import com.example.data.PlaybackState
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.unit.IntSize
-import android.graphics.Bitmap
 import com.example.data.Playlist
 import com.example.data.Song
 import com.example.ui.theme.*
@@ -89,10 +80,6 @@ fun AcousticApp(
     val playlists by viewModel.allPlaylists.collectAsStateWithLifecycle()
     val playState by viewModel.playbackState.collectAsStateWithLifecycle()
     val themeColorMode by viewModel.themeColorMode.collectAsStateWithLifecycle()
-    val fluidBgEnabled by viewModel.fluidBgEnabled.collectAsStateWithLifecycle()
-    val waveSpeed by viewModel.waveSpeed.collectAsStateWithLifecycle()
-    val waveRoughness by viewModel.waveRoughness.collectAsStateWithLifecycle()
-    val waveColorStyle by viewModel.waveColorStyle.collectAsStateWithLifecycle()
     val currentTrackColor by viewModel.currentTrackColor.collectAsStateWithLifecycle()
     val currentTrackColors by viewModel.currentTrackColors.collectAsStateWithLifecycle()
     val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
@@ -188,470 +175,251 @@ fun AcousticApp(
         LocalElectricCyan provides animatedSecondaryColor,
         com.example.ui.theme.LocalTrackColors provides listOf(animatedTrackColor, animatedColor2, animatedColor3)
     ) {
-        // --- 1D Wave Fallback Simulation State ---
-        val steps = 50
-        val waveH1 = remember { FloatArray(steps + 1) }
-        val waveV1 = remember { FloatArray(steps + 1) }
-        val waveH2 = remember { FloatArray(steps + 1) }
-        val waveV2 = remember { FloatArray(steps + 1) }
-        val waveH3 = remember { FloatArray(steps + 1) }
-        val waveV3 = remember { FloatArray(steps + 1) }
-
-        val applyTouchForce = remember {
-            { normalizedX: Float, forceX: Float ->
-                val centerIndex = (normalizedX * steps).toInt().coerceIn(0, steps)
-                val spread = 5
-                for (i in -spread..spread) {
-                    val idx = centerIndex + i
-                    if (idx in 0..steps) {
-                        val dist = Math.abs(i).toFloat() / spread
-                        val factor = (1f - dist * dist).coerceIn(0f, 1f)
-                        waveH1[idx] += forceX * factor * 1.0f
-                        waveH2[idx] -= forceX * factor * 1.2f
-                        waveH3[idx] += forceX * factor * 0.8f
-                    }
-                }
-            }
-        }
-
-        var waveTime by remember { mutableStateOf(0f) }
-        var tick1D by remember { mutableStateOf(0L) }
-
-        LaunchedEffect(playState.isPlaying) {
-            var lastTime = withFrameNanos { it }
-            while (true) {
-                withFrameNanos { frameTimeNanos ->
-                    val diffNanos = frameTimeNanos - lastTime
-                    val diffSeconds = (diffNanos / 1_000_000_000f).coerceAtMost(0.05f)
-                    lastTime = frameTimeNanos
-                    
-                    if (!fluidBgEnabled) {
-                        // Time based orbital drift
-                        val speed = if (playState.isPlaying) 0.60f else 0.12f
-                        waveTime = (waveTime + speed * diffSeconds) % (2f * Math.PI.toFloat())
-
-                        // 1D Wave equation simulation update
-                        val subSteps = 2
-                        val dt = diffSeconds / subSteps
-                        val damping = 0.94f
-                        val k1 = 120f
-                        val k2 = 180f
-                        val k3 = 90f
-
-                        for (step in 1..subSteps) {
-                            // Wave 1 Physics
-                            for (i in 1 until steps) {
-                                val accel = k1 * (waveH1[i - 1] + waveH1[i + 1] - 2 * waveH1[i])
-                                waveV1[i] = (waveV1[i] + accel * dt) * damping
-                            }
-                            waveV1[0] = (waveV1[0] + k1 * (waveH1[1] - waveH1[0]) * dt) * damping
-                            waveV1[steps] = (waveV1[steps] + k1 * (waveH1[steps - 1] - waveH1[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH1[i] += waveV1[i] * dt
-                            }
-
-                            // Wave 2 Physics
-                            for (i in 1 until steps) {
-                                val accel = k2 * (waveH2[i - 1] + waveH2[i + 1] - 2 * waveH2[i])
-                                waveV2[i] = (waveV2[i] + accel * dt) * damping
-                            }
-                            waveV2[0] = (waveV2[0] + k2 * (waveH2[1] - waveH2[0]) * dt) * damping
-                            waveV2[steps] = (waveV2[steps] + k2 * (waveH2[steps - 1] - waveH2[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH2[i] += waveV2[i] * dt
-                            }
-
-                            // Wave 3 Physics
-                            for (i in 1 until steps) {
-                                val accel = k3 * (waveH3[i - 1] + waveH3[i + 1] - 2 * waveH3[i])
-                                waveV3[i] = (waveV3[i] + accel * dt) * damping
-                            }
-                            waveV3[0] = (waveV3[0] + k3 * (waveH3[1] - waveH3[0]) * dt) * damping
-                            waveV3[steps] = (waveV3[steps] + k3 * (waveH3[steps - 1] - waveH3[steps]) * dt) * damping
-                            for (i in 0..steps) {
-                                waveH3[i] += waveV3[i] * dt
-                            }
-                        }
-
-                        for (i in 0..steps) {
-                            waveH1[i] *= 0.985f
-                            waveH2[i] *= 0.985f
-                            waveH3[i] *= 0.985f
-                        }
-
-                        tick1D++
-                    }
-                }
-            }
-        }
-
-        // --- 2D WebGL Fluid Simulation State ---
-        val fluidSim = remember { FluidSimulation(NX = 1440, NY = 3168) }
-        var tick2D by remember { mutableStateOf(0L) }
-
-        val currentWaveSpeed by rememberUpdatedState(waveSpeed)
-        val currentWaveRoughness by rememberUpdatedState(waveRoughness)
-        val currentWaveColorStyle by rememberUpdatedState(waveColorStyle)
-
-        LaunchedEffect(fluidBgEnabled) {
-            if (fluidBgEnabled) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    var lastTime = System.nanoTime()
-                    var elapsedPassiveTime = 0f
-                    val stride = fluidSim.simNX + 2
-                    while (true) {
-                        val currentTime = System.nanoTime()
-                        val diffSeconds = ((currentTime - lastTime) / 1_000_000_000f).coerceIn(0.002f, 0.05f)
-                        lastTime = currentTime
-                        
-                        val speed = currentWaveSpeed
-                        val roughness = currentWaveRoughness
-                        val colorStyle = currentWaveColorStyle
-
-                        elapsedPassiveTime += diffSeconds * speed
-
-                        val dt = diffSeconds * 0.95f
-                        val time = elapsedPassiveTime
-
-                        // Precalculate horizontal (column-wise) rough wave components with high frequency octaves
-                        val colWaveU = FloatArray(fluidSim.simNX + 1)
-                        val colWaveV = FloatArray(fluidSim.simNX + 1)
-                        val colWaveColor = FloatArray(fluidSim.simNX + 1)
-                        
-                        for (i in 1..fluidSim.simNX) {
-                            val progressX = i.toFloat() / fluidSim.simNX
-                            val arg1 = progressX * 6.28f
-                            // Multi-octave wave superposition for ultra-fine choppy sea texture
-                            val wave1 = kotlin.math.sin((arg1 * 2.8f + time * 2.2f).toDouble()).toFloat()
-                            val wave2 = kotlin.math.cos((arg1 * 7.5f - time * 3.5f).toDouble()).toFloat() * 0.42f * roughness
-                            val wave3 = kotlin.math.sin((arg1 * 16.0f + time * 5.5f).toDouble()).toFloat() * 0.22f * roughness
-                            val wave4 = kotlin.math.cos((arg1 * 36.0f - time * 8.5f).toDouble()).toFloat() * 0.11f * roughness
-                            colWaveU[i] = wave1 + wave2 + wave3 + wave4
-
-                            val waveV1 = kotlin.math.cos((arg1 * 2.5f - time * 1.8f).toDouble()).toFloat()
-                            val waveV2 = kotlin.math.sin((arg1 * 8.2f + time * 3.2f).toDouble()).toFloat() * 0.45f * roughness
-                            val waveV3 = kotlin.math.cos((arg1 * 19.0f - time * 4.8f).toDouble()).toFloat() * 0.2f * roughness
-                            val waveV4 = kotlin.math.sin((arg1 * 42.0f + time * 8.0f).toDouble()).toFloat() * 0.1f * roughness
-                            colWaveV[i] = waveV1 + waveV2 + waveV3 + waveV4
-
-                            // Intense multi-frequency color interference coordinates
-                            colWaveColor[i] = (kotlin.math.sin((arg1 * 3.8f + time * 1.6f).toDouble()).toFloat() +
-                                              kotlin.math.cos((arg1 * 12.0f - time * 3.0f).toDouble()).toFloat() * 0.38f * roughness +
-                                              kotlin.math.sin((arg1 * 28.0f + time * 4.6f).toDouble()).toFloat() * 0.2f * roughness +
-                                              kotlin.math.cos((arg1 * 56.0f - time * 7.5f).toDouble()).toFloat() * 0.1f * roughness)
-                        }
-
-                        // Precalculate vertical (row-wise) rough wave components with high frequency octaves
-                        val rowWaveU = FloatArray(fluidSim.simNY + 1)
-                        val rowWaveV = FloatArray(fluidSim.simNY + 1)
-                        val rowWaveColor = FloatArray(fluidSim.simNY + 1)
-                        for (j in 1..fluidSim.simNY) {
-                            val progressY = j.toFloat() / fluidSim.simNY
-                            val arg2 = progressY * 6.28f
-                            val wave1 = kotlin.math.cos((arg2 * 2.2f - time * 1.6f).toDouble()).toFloat()
-                            val wave2 = kotlin.math.sin((arg2 * 6.4f + time * 2.8f).toDouble()).toFloat() * 0.45f * roughness
-                            val wave3 = kotlin.math.cos((arg2 * 14.5f - time * 4.2f).toDouble()).toFloat() * 0.22f * roughness
-                            val wave4 = kotlin.math.sin((arg2 * 32.0f + time * 6.8f).toDouble()).toFloat() * 0.11f * roughness
-                            rowWaveU[j] = wave1 + wave2 + wave3 + wave4
-
-                            val waveV1 = kotlin.math.sin((arg2 * 3.0f + time * 2.0f).toDouble()).toFloat()
-                            val waveV2 = kotlin.math.cos((arg2 * 8.5f - time * 3.4f).toDouble()).toFloat() * 0.48f * roughness
-                            val waveV3 = kotlin.math.sin((arg2 * 21.0f + time * 5.0f).toDouble()).toFloat() * 0.22f * roughness
-                            val waveV4 = kotlin.math.cos((arg2 * 48.0f - time * 7.6f).toDouble()).toFloat() * 0.1f * roughness
-                            rowWaveV[j] = waveV1 + waveV2 + waveV3 + waveV4
-
-                            // Choppy vertical contrast profiles
-                            rowWaveColor[j] = (kotlin.math.sin((arg2 * 3.0f + time * 1.2f).toDouble()).toFloat() +
-                                              kotlin.math.cos((arg2 * 10.5f - time * 2.6f).toDouble()).toFloat() * 0.4f * roughness +
-                                              kotlin.math.sin((arg2 * 24.0f + time * 4.0f).toDouble()).toFloat() * 0.2f * roughness +
-                                              kotlin.math.cos((arg2 * 52.0f - time * 6.5f).toDouble()).toFloat() * 0.12f * roughness)
-                        }
-
-                        // Determine base theme colors dynamically or override based on user preference preset
-                        val rBase: Float
-                        val gBase: Float
-                        val bBase: Float
-                        when (colorStyle) {
-                            "Deep Sea Navy" -> {
-                                rBase = 10f
-                                gBase = 85f + 15f * kotlin.math.sin(time * 0.4f).toFloat()
-                                bBase = 195f
-                            }
-                            "Midnight Violet" -> {
-                                rBase = 165f
-                                gBase = 25f + 10f * kotlin.math.cos(time * 0.5f).toFloat()
-                                bBase = 185f
-                            }
-                            "Toxic Emerald" -> {
-                                rBase = 20f
-                                gBase = 215f
-                                bBase = 75f + 25f * kotlin.math.sin(time * 0.3f).toFloat()
-                            }
-                            "Cyber Sunset" -> {
-                                rBase = 225f
-                                gBase = 80f + 20f * kotlin.math.cos(time * 0.35f).toFloat()
-                                bBase = 10f
-                            }
-                            else -> { // "Dynamic Track"
-                                rBase = (animatedTrackColor.red * 140f)
-                                gBase = (animatedColor2.green * 140f)
-                                bBase = (animatedColor3.blue * 140f)
-                            }
-                        }
-
-                        // Populate grid combining row and column components to form non-uniform turbulent interference patterns
-                        for (j in 1..fluidSim.simNY) {
-                            val rowOffset = j * stride
-                            val ry = rowWaveColor[j]
-                            val uy = rowWaveU[j]
-                            val vy = rowWaveV[j]
-
-                            for (i in 1..fluidSim.simNX) {
-                                val idx = i + rowOffset
-                                
-                                // Multiply and add the vertical and horizontal frequencies to create extremely detailed choppy crests/troughs
-                                val cx = colWaveColor[i]
-                                val totalRoughWave = ry + cx + ry * cx * 0.85f * roughness
-                                
-                                val rWave = rBase + 68f * totalRoughWave * roughness
-                                val gWave = gBase + 68f * totalRoughWave * roughness
-                                val bWave = bBase + 68f * totalRoughWave * roughness
-
-                                val ux = colWaveU[i]
-                                val vx = colWaveV[i]
-                                
-                                val uWaveCurrent = uy + ux + uy * ux * 0.5f
-                                val vWaveCurrent = vy + vx + vy * vx * 0.5f
-
-                                fluidSim.u[idx] += uWaveCurrent * 2.4f
-                                fluidSim.v[idx] += vWaveCurrent * 2.4f
-                                
-                                val rVal = fluidSim.rPrev[idx] * 0.91f + rWave * 0.09f
-                                fluidSim.r[idx] = if (rVal < 0f) 0f else if (rVal > 255f) 255f else rVal
-
-                                val gVal = fluidSim.gPrev[idx] * 0.91f + gWave * 0.09f
-                                fluidSim.g[idx] = if (gVal < 0f) 0f else if (gVal > 255f) 255f else gVal
-
-                                val bVal = fluidSim.bPrev[idx] * 0.91f + bWave * 0.09f
-                                fluidSim.b[idx] = if (bVal < 0f) 0f else if (bVal > 255f) 255f else bVal
-                            }
-                        }
-
-                        fluidSim.step(dt, diffusionAndDyeDecay = 0.995f)
-                        fluidSim.updateBitmap()
-                        tick2D++
-                        kotlinx.coroutines.yield()
-                    }
-                }
-            }
-        }
-
+        // Main layout centering Edge-to-Edge constraints
         Box(
             modifier = modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .pointerInput(fluidBgEnabled) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            event.changes.forEach { change ->
-                                if (change.pressed) {
-                                    val currentX = change.position.x
-                                    val currentY = change.position.y
-                                    val previousX = change.previousPosition.x
-                                    val previousY = change.previousPosition.y
-
-                                    val dx = currentX - previousX
-                                    val dy = currentY - previousY
-
-                                    val w = size.width
-                                    val h = size.height
-                                    if (w > 0f && h > 0f) {
-                                        if (fluidBgEnabled) {
-                                            val gridX = (currentX / w * fluidSim.NX).toInt().coerceIn(1, fluidSim.NX)
-                                            val gridY = (currentY / h * fluidSim.NY).toInt().coerceIn(1, fluidSim.NY)
-
-                                            // Determine drag velocity versus static taps
-                                            val speedScale = 1.6f
-                                            val forceX = if (kotlin.math.abs(dx) > 0.05f) (dx / w * fluidSim.NX) * 580f * speedScale else (Math.random().toFloat() - 0.5f) * 120f
-                                            val forceY = if (kotlin.math.abs(dy) > 0.05f) (dy / h * fluidSim.NY) * 580f * speedScale else (Math.random().toFloat() - 0.5f) * 120f
-                                            fluidSim.addVelocity(gridX, gridY, forceX, forceY, radius = 12)
-
-                                            // Thick, glowing neon dye! Always active on touch
-                                            val c = when ((1..3).random()) {
-                                                1 -> animatedTrackColor
-                                                2 -> animatedColor2
-                                                else -> animatedColor3
-                                            }
-                                            fluidSim.addDensity(
-                                                gridX,
-                                                gridY,
-                                                c.red * 1400f,
-                                                c.green * 1400f,
-                                                c.blue * 1400f,
-                                                radius = 15
-                                            )
-                                        } else {
-                                            val normX = (currentX / w).coerceIn(0f, 1f)
-                                            val force = if (kotlin.math.abs(dx) > 0.5f) 180f else 60f
-                                            applyTouchForce(normX, force)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                .drawBehind {
+                    // Accent glowing vertical artwork cover gradient across the background
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                animatedTrackColor.copy(alpha = 0.15f),
+                                animatedColor2.copy(alpha = 0.05f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    // Top-right glowing cover-art accent blob
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(animatedTrackColor.copy(alpha = 0.28f), Color.Transparent),
+                            center = Offset(size.width * 1.1f, -size.height * 0.1f),
+                            radius = size.width * 1.3f
+                        )
+                    )
+                    // Bottom-left glowing cover-art accent blob
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(animatedColor2.copy(alpha = 0.22f), Color.Transparent),
+                            center = Offset(-size.width * 0.1f, size.height * 1.1f),
+                            radius = size.width * 1.3f
+                        )
+                    )
+                    // Center glowing tertiary blob for rich atmosphere
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(animatedColor3.copy(alpha = 0.18f), Color.Transparent),
+                            center = Offset(size.width * 0.5f, size.height * 0.6f),
+                            radius = size.width * 1.0f
+                        )
+                    )
                 }
         ) {
-            // Layer 1: Ambient background waves / fluid simulations taking up the whole background
-            Box(
+            // Premium Animated Blurred Album Art background
+            val bgInfiniteTransition = rememberInfiniteTransition(label = "bg_artwork_anim")
+            val bgRotation by bgInfiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(60000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "bg_rot"
+            )
+            val bgScale by bgInfiniteTransition.animateFloat(
+                initialValue = 1.05f,
+                targetValue = 1.25f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(25000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "bg_scale"
+            )
+
+            // Flowing Ambient Waves behind the fitted artwork so there's never a black bars/blank space gap
+            val waveTime by bgInfiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 2f * Math.PI.toFloat(),
+                animationSpec = infiniteRepeatable(
+                    animation = tween(14000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "wave_time"
+            )
+
+            androidx.compose.foundation.Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .drawBehind {
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    animatedTrackColor.copy(alpha = 0.15f),
-                                    animatedColor2.copy(alpha = 0.05f),
-                                    Color.Transparent
-                                 )
-                            )
-                        )
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(animatedTrackColor.copy(alpha = 0.28f), Color.Transparent),
-                                center = Offset(size.width * 1.1f, -size.height * 0.1f),
-                                radius = size.width * 1.3f
-                            )
-                        )
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(animatedColor2.copy(alpha = 0.22f), Color.Transparent),
-                                center = Offset(-size.width * 0.1f, size.height * 1.1f),
-                                radius = size.width * 1.3f
-                            )
-                        )
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(animatedColor3.copy(alpha = 0.18f), Color.Transparent),
-                                center = Offset(size.width * 0.5f, size.height * 0.6f),
-                                radius = size.width * 1.0f
-                            )
-                        )
-                    }
+                    .alpha(playState.bgWaveOpacity)
             ) {
-                if (fluidBgEnabled) {
-                    androidx.compose.foundation.Canvas(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .alpha(playState.bgWaveOpacity)
+                val width = size.width
+                val height = size.height
+                val path1 = androidx.compose.ui.graphics.Path()
+                val path2 = androidx.compose.ui.graphics.Path()
+                val path3 = androidx.compose.ui.graphics.Path()
+
+                val baseLine1 = height * 0.35f
+                val baseLine2 = height * 0.52f
+                val baseLine3 = height * 0.68f
+
+                path1.moveTo(0f, height)
+                path1.lineTo(0f, baseLine1)
+                
+                path2.moveTo(0f, height)
+                path2.lineTo(0f, baseLine2)
+
+                path3.moveTo(0f, height)
+                path3.lineTo(0f, baseLine3)
+
+                val steps = 40
+                for (xIndex in 0..steps) {
+                    val x = (width / steps) * xIndex
+                    val progress = xIndex.toFloat() / steps
+                    
+                    val y1 = baseLine1 + 40.dp.toPx() * Math.sin((progress * 2.2 * Math.PI + waveTime).toDouble()).toFloat()
+                    val y2 = baseLine2 + 50.dp.toPx() * Math.sin((progress * 1.8 * Math.PI - waveTime * 1.2).toDouble()).toFloat()
+                    val y3 = baseLine3 + 35.dp.toPx() * Math.cos((progress * 2.8 * Math.PI + waveTime * 0.7).toDouble()).toFloat()
+
+                    if (xIndex == 0) {
+                        path1.lineTo(x, y1)
+                        path2.lineTo(x, y2)
+                        path3.lineTo(x, y3)
+                    } else {
+                        path1.quadraticTo(x - (width / steps) / 2f, y1, x, y1)
+                        path2.quadraticTo(x - (width / steps) / 2f, y2, x, y2)
+                        path3.quadraticTo(x - (width / steps) / 2f, y3, x, y3)
+                    }
+                }
+                path1.lineTo(width, height)
+                path2.lineTo(width, height)
+                path3.lineTo(width, height)
+                path1.close()
+                path2.close()
+                path3.close()
+
+                drawPath(
+                    path = path3,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(animatedTrackColor.copy(alpha = 0.55f), Color.Transparent),
+                        startY = baseLine3 - 40.dp.toPx(),
+                        endY = height
+                    )
+                )
+
+                drawPath(
+                    path = path2,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(animatedSecondaryColor.copy(alpha = 0.45f), Color.Transparent),
+                        startY = baseLine2 - 45.dp.toPx(),
+                        endY = height
+                    )
+                )
+
+                drawPath(
+                    path = path1,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(animatedTrackColor.copy(alpha = 0.35f), Color.Transparent),
+                        startY = baseLine1 - 35.dp.toPx(),
+                        endY = height
+                    )
+                )
+            }
+
+            // Real full-bleed rotating background artwork
+            Crossfade(
+                targetState = playState.currentSong,
+                animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+                modifier = Modifier.fillMaxSize(),
+                label = "bg_artwork_fade"
+            ) { song ->
+                if (song?.albumArtPath != null) {
+                    androidx.compose.foundation.layout.BoxWithConstraints(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        val drawTick = tick2D
-                        val width = size.width
-                        val height = size.height
-                        drawImage(
-                            image = fluidSim.bitmap.asImageBitmap(),
-                            dstSize = IntSize(width.toInt(), height.toInt()),
-                            filterQuality = FilterQuality.Medium
+                        // To prevent rotation-stretching, the image container must be a perfect square of max(width, height)
+                        val maxDimension = if (maxWidth > maxHeight) maxWidth else maxHeight
+                        
+                        var imageModifier = Modifier
+                            .size(maxDimension)
+                            .scale(bgScale * playState.bgScale / 2.4f)
+                            .rotate(bgRotation)
+                        
+                        if (playState.bgBlurRadius > 0.1f) {
+                            imageModifier = imageModifier.blur(playState.bgBlurRadius.dp)
+                        }
+                        
+                        AsyncImage(
+                            model = song.albumArtPath,
+                            contentDescription = null,
+                            contentScale = when (playState.bgContentScale) {
+                                "Crop" -> ContentScale.Crop
+                                "Fit" -> ContentScale.Fit
+                                "Inside" -> ContentScale.Inside
+                                "Fill" -> ContentScale.FillBounds
+                                else -> ContentScale.Crop
+                            },
+                            modifier = imageModifier.alpha(playState.bgAlpha)
                         )
                     }
                 } else {
-                    androidx.compose.foundation.Canvas(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .alpha(playState.bgWaveOpacity)
-                    ) {
-                        val drawTick = tick1D
-                        val width = size.width
-                        val height = size.height
-
-                        val baseLine1 = height * 0.40f
-                        val baseLine2 = height * 0.55f
-                        val baseLine3 = height * 0.70f
-
-                        val path1 = androidx.compose.ui.graphics.Path()
-                        val path2 = androidx.compose.ui.graphics.Path()
-                        val path3 = androidx.compose.ui.graphics.Path()
-
-                        path1.moveTo(0f, height)
-                        path1.lineTo(0f, baseLine1)
-
-                        path2.moveTo(0f, height)
-                        path2.lineTo(0f, baseLine2)
-
-                        path3.moveTo(0f, height)
-                        path3.lineTo(0f, baseLine3)
-
-                        for (xIndex in 0..steps) {
-                            val x = (width / steps) * xIndex
-                            val progress = xIndex.toFloat() / steps
-
-                            val physH1 = waveH1[xIndex]
-                            val physH2 = waveH2[xIndex]
-                            val physH3 = waveH3[xIndex]
-
-                            val y1 = baseLine1 - physH1 + 35.dp.toPx() * Math.sin((progress * 2.0 * Math.PI + waveTime).toDouble()).toFloat()
-                            val y2 = baseLine2 + physH2 + 45.dp.toPx() * Math.sin((progress * 1.5 * Math.PI - waveTime * 1.3).toDouble()).toFloat()
-                            val y3 = baseLine3 - physH3 + 55.dp.toPx() * Math.cos((progress * 2.5 * Math.PI + waveTime * 0.8).toDouble()).toFloat()
-
-                            if (xIndex == 0) {
-                                path1.lineTo(x, y1)
-                                path2.lineTo(x, y2)
-                                path3.lineTo(x, y3)
-                            } else {
-                                path1.quadraticTo(x - (width / steps) / 2f, y1, x, y1)
-                                path2.quadraticTo(x - (width / steps) / 2f, y2, x, y2)
-                                path3.quadraticTo(x - (width / steps) / 2f, y3, x, y3)
-                            }
-                        }
-
-                        path1.lineTo(width, height)
-                        path2.lineTo(width, height)
-                        path3.lineTo(width, height)
-
-                        path1.close()
-                        path2.close()
-                        path3.close()
-
-                        drawPath(
-                            path = path3,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedColor3.copy(alpha = 0.45f), Color.Transparent),
-                                startY = baseLine3 - 50.dp.toPx(),
-                                endY = height
-                            )
-                        )
-
-                        drawPath(
-                            path = path2,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedColor2.copy(alpha = 0.35f), Color.Transparent),
-                                startY = baseLine2 - 40.dp.toPx(),
-                                endY = height
-                            )
-                        )
-
-                        drawPath(
-                            path = path1,
-                            brush = Brush.verticalGradient(
-                                colors = listOf(animatedTrackColor.copy(alpha = 0.25f), Color.Transparent),
-                                startY = baseLine1 - 30.dp.toPx(),
-                                endY = height
-                            )
-                        )
-                    }
+                            .alpha(0.12f)
+                    )
                 }
             }
 
-            // Layer 2: Main application Scaffold rendered on top of the transparent canvas
             Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                topBar = {
-                    Spacer(modifier = Modifier.statusBarsPadding())
-                },
-                bottomBar = {
-                    Column {
-                        // Collapsed bottom bar playback widget
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                // Symmetrical full-width premium spectral visualizer under the device status bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 10.dp, bottom = 4.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    PlayingVisualizer(
+                        isPlaying = playState.isPlaying,
+                        color = CyberEmerald.copy(alpha = 0.82f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp),
+                        barCount = 42,
+                        gapFraction = 0.28f,
+                        songId = playState.currentSong?.id ?: 0L,
+                        songTitle = playState.currentSong?.title ?: "",
+                        playbackProgress = playState.progress
+                    )
+                }
+            },
+            bottomBar = {
+                Column {
+                    // Full-width dividing equalizer visualizer right above the bottom menu & player
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp, start = 16.dp, end = 16.dp)
+                    ) {
+                        PlayingVisualizer(
+                            isPlaying = playState.isPlaying,
+                            color = CyberEmerald.copy(alpha = 0.82f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(10.dp),
+                            barCount = 42,
+                            gapFraction = 0.28f,
+                            songId = playState.currentSong?.id ?: 0L,
+                            songTitle = playState.currentSong?.title ?: "",
+                            playbackProgress = playState.progress
+                        )
+                    }
+
+                    // Collapsed bottom bar playback widget
                     playState.currentSong?.let { _ ->
                         AnimatedVisibility(
                             visible = !isPlayerExpanded,
@@ -759,15 +527,7 @@ fun AcousticApp(
                         },
                         onBackgroundContentScaleChanged = { scaleType ->
                             viewModel.setBackgroundContentScale(scaleType)
-                        },
-                        fluidBgEnabled = fluidBgEnabled,
-                        onFluidBgToggled = { viewModel.setFluidBgEnabled(it) },
-                        waveSpeed = waveSpeed,
-                        waveRoughness = waveRoughness,
-                        waveColorStyle = waveColorStyle,
-                        onWaveSpeedChanged = { viewModel.setWaveSpeed(it) },
-                        onWaveRoughnessChanged = { viewModel.setWaveRoughness(it) },
-                        onWaveColorStyleChanged = { viewModel.setWaveColorStyle(it) }
+                        }
                     )
                 }
             }
@@ -864,7 +624,7 @@ fun TabNavigationBar(
     onTabSelected: (String) -> Unit
 ) {
     NavigationBar(
-        containerColor = CosmicSurface.copy(alpha = 0.60f),
+        containerColor = CosmicSurface,
         contentColor = TextPrimary,
         tonalElevation = 8.dp,
         modifier = Modifier
@@ -939,13 +699,12 @@ fun SongsDashboard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                val trackColors = LocalTrackColors.current
                 Text(
                     text = "Acoustic",
                     style = MaterialTheme.typography.headlineMedium.copy(
-                        brush = Brush.horizontalGradient(trackColors),
+                        color = CyberEmerald,
                         fontWeight = FontWeight.ExtraBold,
-                        shadow = Shadow(color = trackColors.getOrNull(0)?.copy(alpha = 0.3f) ?: CyberEmerald.copy(0.3f), blurRadius = 8f)
+                        shadow = Shadow(color = CyberEmerald.copy(0.3f), blurRadius = 8f)
                     )
                 )
                 Text(
@@ -1198,7 +957,7 @@ fun PlayingVisualizer(
     songTitle: String = "",
     playbackProgress: Long = 0L
 ) {
-    // Columns are completely disabled per user feedback
+    // Visualizers disabled as requested
 }
 
 // --- Composite Specific Song Item Card Layout ---
@@ -1216,10 +975,6 @@ fun SongTrackItemCard(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    val trackColor = LocalCyberEmerald.current
-    val blendedSurface = lerpColor(CosmicSurface, trackColor, 0.08f)
-    val blendedActive = lerpColor(CosmicSurfaceValue, trackColor, 0.22f)
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1230,15 +985,9 @@ fun SongTrackItemCard(
             .testTag("song_card_${song.id}"),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = (if (isActive) blendedActive else blendedSurface).copy(alpha = 0.60f)
+            containerColor = if (isActive) CosmicSurfaceValue else CosmicSurface
         ),
-        border = if (isActive) {
-            val trackColors = LocalTrackColors.current
-            BorderStroke(
-                width = 1.3.dp,
-                brush = Brush.horizontalGradient(trackColors)
-            )
-        } else null
+        border = if (isActive) BorderStroke(1.dp, CyberEmerald.copy(0.4f)) else null
     ) {
         Row(
             modifier = Modifier
@@ -1275,22 +1024,11 @@ fun SongTrackItemCard(
             // Body Details Column text
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val trackColors = LocalTrackColors.current
                     Text(
                         text = song.title,
-                        style = if (isActive) {
-                            LocalTextStyle.current.copy(
-                                brush = Brush.horizontalGradient(trackColors),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        } else {
-                            LocalTextStyle.current.copy(
-                                color = TextPrimary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        },
+                        color = if (isActive) CyberEmerald else TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -1416,11 +1154,10 @@ fun PlaylistsDashboard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    val trackColors = LocalTrackColors.current
                     Text(
                         text = "Playlists",
                         style = MaterialTheme.typography.headlineMedium.copy(
-                            brush = Brush.horizontalGradient(trackColors),
+                            color = CyberEmerald,
                             fontWeight = FontWeight.ExtraBold
                         )
                     )
@@ -1502,7 +1239,7 @@ fun PlaylistsDashboard(
                                 .fillMaxWidth()
                                 .clickable { onSelectPlaylist(playlist.id) }
                                 .testTag("playlist_card_${playlist.id}"),
-                            colors = CardDefaults.cardColors(containerColor = CosmicSurface.copy(alpha = 0.60f)),
+                            colors = CardDefaults.cardColors(containerColor = CosmicSurface),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Row(
@@ -1578,11 +1315,10 @@ fun PlaylistsDashboard(
                 Spacer(modifier = Modifier.width(8.dp))
 
                 Column {
-                    val trackColors = LocalTrackColors.current
                     Text(
                         text = activePlaylist?.name ?: "Playlist Info",
                         style = MaterialTheme.typography.headlineMedium.copy(
-                            brush = Brush.horizontalGradient(trackColors),
+                            color = TextPrimary,
                             fontWeight = FontWeight.ExtraBold
                         ),
                         maxLines = 1,
@@ -1634,26 +1370,14 @@ fun PlaylistsDashboard(
                         .weight(1f)
                 ) {
                     items(playlistSongs, key = { it.id }) { song ->
-                        val trackColor = LocalCyberEmerald.current
-                        val isActive = currentSong?.id == song.id
-                        val blendedSurface = lerpColor(CosmicSurface, trackColor, 0.08f)
-                        val blendedActive = lerpColor(CosmicSurfaceValue, trackColor, 0.22f)
-
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onPlaySongInPlaylist(song) },
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = (if (isActive) blendedActive else blendedSurface).copy(alpha = 0.60f)
-                            ),
-                            border = if (isActive) {
-                                val trackColors = LocalTrackColors.current
-                                BorderStroke(
-                                    width = 1.3.dp,
-                                    brush = Brush.horizontalGradient(trackColors)
-                                )
-                            } else null
+                                containerColor = if (currentSong?.id == song.id) CosmicSurfaceValue else CosmicSurface
+                            )
                         ) {
                             Row(
                                 modifier = Modifier
@@ -1741,11 +1465,10 @@ fun FavoritesDashboard(
             .padding(16.dp)
     ) {
         Column {
-            val trackColors = LocalTrackColors.current
             Text(
                 text = "Favorites",
                 style = MaterialTheme.typography.headlineMedium.copy(
-                    brush = Brush.horizontalGradient(trackColors),
+                    color = CyberEmerald,
                     fontWeight = FontWeight.ExtraBold
                 )
             )
@@ -1837,15 +1560,7 @@ fun SettingsDashboard(
     onCrossfadeToggled: (Boolean) -> Unit,
     onCrossfadeSecondsChanged: (Int) -> Unit,
     onBackgroundParamsChanged: (Float, Float, Float, Float) -> Unit,
-    onBackgroundContentScaleChanged: (String) -> Unit,
-    fluidBgEnabled: Boolean,
-    onFluidBgToggled: (Boolean) -> Unit,
-    waveSpeed: Float,
-    waveRoughness: Float,
-    waveColorStyle: String,
-    onWaveSpeedChanged: (Float) -> Unit,
-    onWaveRoughnessChanged: (Float) -> Unit,
-    onWaveColorStyleChanged: (String) -> Unit
+    onBackgroundContentScaleChanged: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -1853,11 +1568,10 @@ fun SettingsDashboard(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        val trackColors = LocalTrackColors.current
         Text(
             text = "Fine-Tuning",
             style = MaterialTheme.typography.headlineMedium.copy(
-                brush = Brush.horizontalGradient(trackColors),
+                color = CyberEmerald,
                 fontWeight = FontWeight.ExtraBold
             )
         )
@@ -2034,46 +1748,91 @@ fun SettingsDashboard(
                     fontSize = 12.sp
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Interactive Fluid Simulation Switch row
+                // Slider 1: Blur Radius
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onFluidBgToggled(!fluidBgEnabled) }
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Interactive Fluid Waves",
-                            color = ElectricCyan,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Text(
-                            text = "A colorful WebGL-style fluid sim that ripples with touch dragging and spikes dynamically to music beats.",
-                            color = TextSecondary,
-                            fontSize = 11.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Switch(
-                        checked = fluidBgEnabled,
-                        onCheckedChange = onFluidBgToggled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = CosmicDarkBg,
-                            checkedTrackColor = CyberEmerald,
-                            uncheckedThumbColor = TextSecondary,
-                            uncheckedTrackColor = CosmicSurfaceValue
-                        ),
-                        modifier = Modifier.testTag("fluid_sim_switch")
+                    Text(
+                        text = "Artwork Blur Radius: ${state.bgBlurRadius.toInt()} dp",
+                        color = ElectricCyan,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
+                Slider(
+                    value = state.bgBlurRadius,
+                    onValueChange = {
+                        onBackgroundParamsChanged(it, state.bgAlpha, state.bgScale, state.bgWaveOpacity)
+                    },
+                    valueRange = 0f..50f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = ElectricCyan,
+                        activeTrackColor = ElectricCyan,
+                        inactiveTrackColor = CosmicSurfaceValue
+                    ),
+                    modifier = Modifier.testTag("bg_blur_slider")
+                )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Slider 2: Artwork Opacity
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Artwork Opacity: ${(state.bgAlpha * 100).toInt()}%",
+                        color = CyberEmerald,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = state.bgAlpha,
+                    onValueChange = {
+                        onBackgroundParamsChanged(state.bgBlurRadius, it, state.bgScale, state.bgWaveOpacity)
+                    },
+                    valueRange = 0f..1f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = CyberEmerald,
+                        activeTrackColor = CyberEmerald,
+                        inactiveTrackColor = CosmicSurfaceValue
+                    ),
+                    modifier = Modifier.testTag("bg_alpha_slider")
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Slider 3: Artwork Scale
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Artwork Scale: ${String.format("%.1f", state.bgScale)}x",
+                        color = CyberEmerald,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = state.bgScale,
+                    onValueChange = {
+                        onBackgroundParamsChanged(state.bgBlurRadius, state.bgAlpha, it, state.bgWaveOpacity)
+                    },
+                    valueRange = 1.0f..5.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = CyberEmerald,
+                        activeTrackColor = CyberEmerald,
+                        inactiveTrackColor = CosmicSurfaceValue
+                    ),
+                    modifier = Modifier.testTag("bg_scale_slider")
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Slider 4: Wave Opacity
                 Row(
@@ -2100,132 +1859,43 @@ fun SettingsDashboard(
                     ),
                     modifier = Modifier.testTag("bg_wave_slider")
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Wave customization parameters card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = CosmicSurface)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Wave Engine Configurations",
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                Text(
-                    text = "Configure physics coefficients of the real-time fluid ripples and visual waves.",
-                    color = TextSecondary,
-                    fontSize = 12.sp
-                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Wave color style selection
                 Text(
-                    text = "Wave Color Style Theme",
-                    color = ElectricCyan,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "Artwork Fitting Mode",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                
-                val styles = listOf(
-                    "Dynamic Track",
-                    "Deep Sea Navy",
-                    "Midnight Violet",
-                    "Toxic Emerald",
-                    "Cyber Sunset"
-                )
-                
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(styles) { style ->
-                        val isSelected = waveColorStyle == style
+                    val scales = listOf("Crop", "Fit", "Inside", "Fill")
+                    scales.forEach { scaleOption ->
+                        val isSelected = state.bgContentScale == scaleOption
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    if (isSelected) CyberEmerald.copy(alpha = 0.2f) else CosmicSurfaceValue
-                                )
-                                .border(
-                                    BorderStroke(
-                                        width = 1.dp,
-                                        color = if (isSelected) CyberEmerald else Color.White.copy(alpha = 0.12f)
-                                    ),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                                .clickable { onWaveColorStyleChanged(style) }
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) CyberEmerald else CosmicSurfaceValue)
+                                .clickable { onBackgroundContentScaleChanged(scaleOption) }
+                                .testTag("bg_scale_${scaleOption.lowercase()}"),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = style,
-                                color = if (isSelected) CyberEmerald else TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                text = scaleOption,
+                                color = if (isSelected) CosmicDarkBg else TextPrimary,
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp
                             )
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Slider for Wave Speed
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Wave Velocity / Speed: ${String.format("%.1fx", waveSpeed)}",
-                        color = ElectricCyan,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Slider(
-                    value = waveSpeed,
-                    onValueChange = onWaveSpeedChanged,
-                    valueRange = 0.2f..3.0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = ElectricCyan,
-                        activeTrackColor = ElectricCyan,
-                        inactiveTrackColor = CosmicSurfaceValue
-                    ),
-                    modifier = Modifier.testTag("wave_speed_slider")
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Slider for Wave Roughness
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Wave Choppiness / Roughness: ${String.format("%.1fx", waveRoughness)}",
-                        color = ElectricCyan,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Slider(
-                    value = waveRoughness,
-                    onValueChange = onWaveRoughnessChanged,
-                    valueRange = 0.0f..3.0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = ElectricCyan,
-                        activeTrackColor = ElectricCyan,
-                        inactiveTrackColor = CosmicSurfaceValue
-                    ),
-                    modifier = Modifier.testTag("wave_roughness_slider")
-                )
             }
         }
 
@@ -2288,12 +1958,9 @@ fun CollapsedMiniPlayer(
             )
             .clickable { onExpandToggle() }
             .testTag("mini_player"),
-        color = lerpColor(CosmicSurface, accentColor, 0.12f).copy(alpha = 0.60f),
+        color = CosmicSurface,
         shadowElevation = 12.dp,
-        border = BorderStroke(
-            width = 1.3.dp,
-            brush = Brush.horizontalGradient(LocalTrackColors.current)
-        )
+        border = BorderStroke(1.dp, CosmicSurfaceValue)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
@@ -2339,14 +2006,11 @@ fun CollapsedMiniPlayer(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        val trackColors = LocalTrackColors.current
                         Text(
                             text = currentSong.title,
-                            style = LocalTextStyle.current.copy(
-                                brush = Brush.horizontalGradient(trackColors),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            ),
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)
@@ -2397,21 +2061,16 @@ fun CollapsedMiniPlayer(
                 }
             }
 
-            // High precision underlying loading linear indicator styled with custom multicolored gradient!
+            // High precision underlying loading linear indicator
             val progressRatio = if (state.duration > 0) state.progress.toFloat() / state.duration else 0f
-            Box(
+            LinearProgressIndicator(
+                progress = { progressRatio },
+                color = CyberEmerald,
+                trackColor = CosmicDarkBg,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp)
-                    .background(CosmicDarkBg)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(progressRatio)
-                        .background(Brush.horizontalGradient(LocalTrackColors.current))
-                )
-            }
+                    .height(2.5.dp)
+            )
         }
     }
 }
@@ -2432,7 +2091,6 @@ fun FullMusicPlayerSheet(
     onQueueToggle: () -> Unit
 ) {
     val currentSong = state.currentSong ?: return
-    val animatedTrackColor by animateColorAsState(trackColor, label = "fullPlayerTrackColor")
 
     var sliderDraggingValue by remember { mutableStateOf<Float?>(null) }
 
@@ -2474,16 +2132,15 @@ fun FullMusicPlayerSheet(
     )
     val finalArtworkScale = if (state.isPlaying) beatScale else 1.0f
 
-    val playerBgColors = com.example.ui.theme.LocalTrackColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        playerBgColors.getOrElse(0) { trackColor }.copy(alpha = 0.55f),
-                        playerBgColors.getOrElse(1) { trackColor }.copy(alpha = 0.35f),
-                        CosmicDarkBg.copy(alpha = 0.94f)
+                        trackColor.copy(alpha = 0.28f),
+                        CosmicDarkBg,
+                        CosmicDarkBg
                     )
                 )
             )
@@ -2521,24 +2178,13 @@ fun FullMusicPlayerSheet(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .wrapContentWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0D0F14).copy(alpha = 0.7f))
-                        .background(animatedTrackColor.copy(alpha = 0.20f))
-                        .border(1.dp, animatedTrackColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "NOW PLAYING",
-                        color = ElectricCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 2.sp
-                    )
-                }
+                Text(
+                    text = "NOW PLAYING",
+                    color = ElectricCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 2.sp
+                )
 
                 IconButton(
                     onClick = onQueueToggle,
@@ -2562,7 +2208,6 @@ fun FullMusicPlayerSheet(
             ) {
                 // Secondary outer expanded pulse glow (noticeable breathing wave)
                 val pulseOuterScale = 1.0f + (finalGlowScale - 1.0f) * 1.6f
-                val haloColors = com.example.ui.theme.LocalTrackColors.current
                 Box(
                     modifier = Modifier
                         .size(310.dp * pulseOuterScale)
@@ -2570,8 +2215,8 @@ fun FullMusicPlayerSheet(
                             drawCircle(
                                 Brush.radialGradient(
                                     colors = listOf(
-                                        haloColors.getOrElse(0) { trackColor }.copy(alpha = 0.50f),
-                                        haloColors.getOrElse(1) { trackColor }.copy(alpha = 0.15f),
+                                        trackColor.copy(alpha = 0.55f),
+                                        trackColor.copy(alpha = 0.18f),
                                         Color.Transparent
                                     ),
                                     center = Offset(size.width / 2, size.height / 2),
@@ -2589,8 +2234,8 @@ fun FullMusicPlayerSheet(
                             drawCircle(
                                 Brush.radialGradient(
                                     colors = listOf(
-                                        haloColors.getOrElse(1) { trackColor }.copy(alpha = 0.70f),
-                                        haloColors.getOrElse(2) { trackColor }.copy(alpha = 0.25f),
+                                        trackColor.copy(alpha = 0.85f),
+                                        trackColor.copy(alpha = 0.35f),
                                         Color.Transparent
                                     ),
                                     center = Offset(size.width / 2, size.height / 2),
@@ -2653,21 +2298,14 @@ fun FullMusicPlayerSheet(
             // Text Metadata Detail wrapper block
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .wrapContentWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFF0D0F14).copy(alpha = 0.75f))
-                    .background(animatedTrackColor.copy(alpha = 0.15f))
-                    .border(1.dp, animatedTrackColor.copy(alpha = 0.30f), RoundedCornerShape(18.dp))
-                    .padding(vertical = 12.dp, horizontal = 24.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                val trackColors = LocalTrackColors.current
                 Text(
                     text = currentSong.title,
+                    color = TextPrimary,
                     style = MaterialTheme.typography.titleLarge.copy(
-                        brush = Brush.horizontalGradient(trackColors),
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 21.sp
+                        fontSize = 22.sp
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2679,7 +2317,7 @@ fun FullMusicPlayerSheet(
                     color = CyberEmerald,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 15.sp
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2691,7 +2329,7 @@ fun FullMusicPlayerSheet(
                 PlayingVisualizer(
                     isPlaying = state.isPlaying,
                     color = CyberEmerald,
-                    modifier = Modifier.width(240.dp).height(24.dp),
+                    modifier = Modifier.width(260.dp).height(24.dp),
                     barCount = 32,
                     songId = currentSong.id,
                     songTitle = currentSong.title,
@@ -2702,15 +2340,7 @@ fun FullMusicPlayerSheet(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Progress Slider seeking widgets
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF0D0F14).copy(alpha = 0.75f))
-                    .background(animatedTrackColor.copy(alpha = 0.15f))
-                    .border(1.dp, animatedTrackColor.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 val currentProgress = sliderDraggingValue ?: state.progress.toFloat()
                 val progressMax = maxOf(state.duration.toFloat(), 1f)
 
@@ -2737,20 +2367,18 @@ fun FullMusicPlayerSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 6.dp),
+                        .padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = formatDuration(currentProgress.toLong()),
                         color = TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 12.sp
                     )
                     Text(
                         text = formatDuration(state.duration),
                         color = TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -2848,7 +2476,6 @@ fun QueuePlayerSheet(
     onCollapse: () -> Unit,
     onSongSelected: (Song) -> Unit
 ) {
-    val animatedTrackColor by animateColorAsState(trackColor, label = "queuePlayerTrackColor")
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -2886,24 +2513,14 @@ fun QueuePlayerSheet(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .wrapContentWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0D0F14).copy(alpha = 0.7f))
-                        .background(animatedTrackColor.copy(alpha = 0.20f))
-                        .border(1.dp, animatedTrackColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "PLAYBACK QUEUE",
-                        color = ElectricCyan,
-                        fontSize = 11.sp,
+                Text(
+                    text = "PLAYBACK QUEUE",
+                    color = ElectricCyan,
+                    style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 2.sp
+                        letterSpacing = 1.5.sp
                     )
-                }
+                )
 
                 Spacer(modifier = Modifier.width(32.dp))
             }
@@ -3438,245 +3055,4 @@ fun formatDuration(durationMs: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return String.format("%02d:%02d", minutes, seconds)
-}
-
-class FluidSimulation(val NX: Int = 1440, val NY: Int = 3168) {
-    // Highly optimized internal grid dimension exactly matching the 1440:3168 aspect ratio
-    val simNX = 273
-    val simNY = 600
-    val size = (simNX + 2) * (simNY + 2)
-    
-    val u = FloatArray(size)
-    val v = FloatArray(size)
-    val uPrev = FloatArray(size)
-    val vPrev = FloatArray(size)
-    
-    val r = FloatArray(size)
-    val g = FloatArray(size)
-    val b = FloatArray(size)
-    val rPrev = FloatArray(size)
-    val gPrev = FloatArray(size)
-    val bPrev = FloatArray(size)
-
-    private val pixelBuffer = IntArray(simNX * simNY)
-    var bitmap: Bitmap = Bitmap.createBitmap(simNX, simNY, Bitmap.Config.ARGB_8888)
-
-    fun clear() {
-        for (i in 0 until size) {
-            u[i] = 0f; v[i] = 0f; uPrev[i] = 0f; vPrev[i] = 0f
-            r[i] = 0f; g[i] = 0f; b[i] = 0f; rPrev[i] = 0f; gPrev[i] = 0f; bPrev[i] = 0f
-        }
-    }
-
-    fun addDensity(x: Int, y: Int, amountR: Float, amountG: Float, amountB: Float, radius: Int = 2) {
-        // Map high-resolution x/y coordinates to internal grid coordinates
-        val mappedX = (x.toFloat() / NX * simNX).toInt().coerceIn(1, simNX)
-        val mappedY = (y.toFloat() / NY * simNY).toInt().coerceIn(1, simNY)
-        val stride = simNX + 2
-        for (i in -radius..radius) {
-            for (j in -radius..radius) {
-                val gx = mappedX + i
-                val gy = mappedY + j
-                if (gx in 1..simNX && gy in 1..simNY) {
-                    val idx = gx + gy * stride
-                    val factor = 1.0f - (i*i + j*j).toFloat() / (radius*radius + 1)
-                    if (factor > 0f) {
-                        r[idx] = (r[idx] + amountR * factor).coerceIn(0f, 255f)
-                        g[idx] = (g[idx] + amountG * factor).coerceIn(0f, 255f)
-                        b[idx] = (b[idx] + amountB * factor).coerceIn(0f, 255f)
-                    }
-                }
-            }
-        }
-    }
-
-    fun addVelocity(x: Int, y: Int, amountU: Float, amountV: Float, radius: Int = 2) {
-        // Map high-resolution x/y coordinates to internal grid coordinates
-        val mappedX = (x.toFloat() / NX * simNX).toInt().coerceIn(1, simNX)
-        val mappedY = (y.toFloat() / NY * simNY).toInt().coerceIn(1, simNY)
-        val stride = simNX + 2
-        for (i in -radius..radius) {
-            for (j in -radius..radius) {
-                val gx = mappedX + i
-                val gy = mappedY + j
-                if (gx in 1..simNX && gy in 1..simNY) {
-                    val idx = gx + gy * stride
-                    val factor = 1.0f - (i*i + j*j).toFloat() / (radius*radius + 1)
-                    if (factor > 0f) {
-                        u[idx] += amountU * factor
-                        v[idx] += amountV * factor
-                    }
-                }
-            }
-        }
-    }
-
-    private fun IX(x: Int, y: Int): Int {
-        return x + (simNX + 2) * y
-    }
-
-    private fun set_bnd(b: Int, x: FloatArray) {
-        val stride = simNX + 2
-        for (i in 1..simNX) {
-            x[i] = if (b == 2) -x[i + stride] else x[i + stride]
-            x[i + (simNY + 1) * stride] = if (b == 2) -x[i + simNY * stride] else x[i + simNY * stride]
-        }
-        for (j in 1..simNY) {
-            val rowOffset = j * stride
-            x[rowOffset] = if (b == 1) -x[1 + rowOffset] else x[1 + rowOffset]
-            x[simNX + 1 + rowOffset] = if (b == 1) -x[simNX + rowOffset] else x[simNX + rowOffset]
-        }
-        
-        val cornerY1 = (simNY + 1) * stride
-        
-        x[0] = 0.5f * (x[1] + x[stride])
-        x[cornerY1] = 0.5f * (x[1 + cornerY1] + x[simNY * stride])
-        x[simNX + 1] = 0.5f * (x[simNX] + x[simNX + 1 + stride])
-        x[simNX + 1 + cornerY1] = 0.5f * (x[simNX + cornerY1] + x[simNX + 1 + simNY * stride])
-    }
-
-    private fun project(u: FloatArray, v: FloatArray, p: FloatArray, div: FloatArray) {
-        val stride = simNX + 2
-        val scale = -0.5f / simNX.toFloat()
-        for (j in 1..simNY) {
-            val rowOffset = j * stride
-            val rowOffsetPrev = (j - 1) * stride
-            val rowOffsetNext = (j + 1) * stride
-            for (i in 1..simNX) {
-                val idx = i + rowOffset
-                div[idx] = scale * (
-                    u[idx + 1] - u[idx - 1] +
-                    v[i + rowOffsetNext] - v[i + rowOffsetPrev]
-                )
-                p[idx] = 0f
-            }
-        }
-        set_bnd(0, div)
-        set_bnd(0, p)
-
-        for (k in 0 until 6) {
-            for (j in 1..simNY) {
-                val rowOffset = j * stride
-                val rowOffsetPrev = (j - 1) * stride
-                val rowOffsetNext = (j + 1) * stride
-                for (i in 1..simNX) {
-                    val idx = i + rowOffset
-                    p[idx] = (div[idx] + p[idx - 1] + p[idx + 1] + p[i + rowOffsetPrev] + p[i + rowOffsetNext]) * 0.25f
-                }
-            }
-            set_bnd(0, p)
-        }
-
-        val uScale = 0.5f * simNX
-        val vScale = 0.5f * simNY
-        for (j in 1..simNY) {
-            val rowOffset = j * stride
-            val rowOffsetPrev = (j - 1) * stride
-            val rowOffsetNext = (j + 1) * stride
-            for (i in 1..simNX) {
-                val idx = i + rowOffset
-                u[idx] -= uScale * (p[idx + 1] - p[idx - 1])
-                v[idx] -= vScale * (p[i + rowOffsetNext] - p[i + rowOffsetPrev])
-            }
-        }
-        set_bnd(1, u)
-        set_bnd(2, v)
-    }
-
-    private fun advect(b: Int, d: FloatArray, d0: FloatArray, u: FloatArray, v: FloatArray, dt: Float) {
-        val dt0_x = dt * simNX
-        val dt0_y = dt * simNY
-        val stride = simNX + 2
-        for (j in 1..simNY) {
-            val rowOffset = j * stride
-            for (i in 1..simNX) {
-                val idx = i + rowOffset
-                var x = i - dt0_x * u[idx]
-                var y = j - dt0_y * v[idx]
-                
-                if (x < 0.5f) x = 0.5f
-                if (x > simNX + 0.5f) x = simNX + 0.5f
-                val i0 = x.toInt()
-                val i1 = i0 + 1
-                
-                if (y < 0.5f) y = 0.5f
-                if (y > simNY + 0.5f) y = simNY + 0.5f
-                val j0 = y.toInt()
-                val j1 = j0 + 1
-                
-                val s1 = x - i0
-                val s0 = 1f - s1
-                val t1 = y - j0
-                val t0 = 1f - t1
-                
-                val row0 = j0 * stride
-                val row1 = j1 * stride
-                
-                d[idx] = s0 * (t0 * d0[i0 + row0] + t1 * d0[i0 + row1]) +
-                         s1 * (t0 * d0[i1 + row0] + t1 * d0[i1 + row1])
-            }
-        }
-        set_bnd(b, d)
-    }
-
-    private fun diffuse(b: Int, x: FloatArray, x0: FloatArray, diff: Float, dt: Float) {
-        val a = dt * diff * simNX * simNY
-        val stride = simNX + 2
-        val invDenom = 1f / (1f + 4f * a)
-        for (k in 0 until 4) {
-            for (j in 1..simNY) {
-                val rowOffset = j * stride
-                val rowOffsetPrev = (j - 1) * stride
-                val rowOffsetNext = (j + 1) * stride
-                for (i in 1..simNX) {
-                    val idx = i + rowOffset
-                    x[idx] = (x0[idx] + a * (x[idx - 1] + x[idx + 1] + x[i + rowOffsetPrev] + x[i + rowOffsetNext])) * invDenom
-                }
-            }
-            set_bnd(b, x)
-        }
-    }
-
-    fun step(dt: Float, diffusionAndDyeDecay: Float = 0.982f) {
-        diffuse(1, uPrev, u, 0.0001f, dt)
-        diffuse(2, vPrev, v, 0.0001f, dt)
-        project(uPrev, vPrev, u, v)
-
-        advect(1, u, uPrev, uPrev, vPrev, dt)
-        advect(2, v, vPrev, uPrev, vPrev, dt)
-        project(u, v, uPrev, vPrev)
-
-        advect(0, rPrev, r, u, v, dt)
-        advect(0, gPrev, g, u, v, dt)
-        advect(0, bPrev, b, u, v, dt)
-
-        for (i in 0 until size) {
-            r[i] = rPrev[i] * diffusionAndDyeDecay
-            g[i] = gPrev[i] * diffusionAndDyeDecay
-            b[i] = bPrev[i] * diffusionAndDyeDecay
-            u[i] *= 0.95f
-            v[i] *= 0.95f
-        }
-    }
-
-    fun updateBitmap() {
-        var pixelIndex = 0
-        val stride = simNX + 2
-        for (y in 1..simNY) {
-            val rowOffset = y * stride
-            for (x in 1..simNX) {
-                val idx = x + rowOffset
-                val red = r[idx].toInt().coerceIn(0, 255)
-                val green = g[idx].toInt().coerceIn(0, 255)
-                val blue = b[idx].toInt().coerceIn(0, 255)
-                
-                // Maximize alpha luminosity so neon colors are brilliantly opaque and visible!
-                val maxVal = kotlin.math.max(red, kotlin.math.max(green, blue))
-                val alpha = if (maxVal == 0) 0 else (maxVal * 1.6f).toInt().coerceIn(60, 255)
-                
-                pixelBuffer[pixelIndex++] = (alpha shl 24) or (red shl 16) or (green shl 8) or blue
-            }
-        }
-        bitmap.setPixels(pixelBuffer, 0, simNX, 0, 0, simNX, simNY)
-    }
 }

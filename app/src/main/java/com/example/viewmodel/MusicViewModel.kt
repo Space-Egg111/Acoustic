@@ -50,42 +50,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         EXACT_ART_COLORS   // Exact artwork multiple colors (theme & component gradients)
     }
 
-    private val _themeColorMode = MutableStateFlow(ThemeColorMode.EXACT_ART_COLORS)
+    private val _themeColorMode = MutableStateFlow(ThemeColorMode.ART_COMPLEMENTARY)
     val themeColorMode: StateFlow<ThemeColorMode> = _themeColorMode.asStateFlow()
-
-    private val _fluidBgEnabled = MutableStateFlow(true)
-    val fluidBgEnabled: StateFlow<Boolean> = _fluidBgEnabled.asStateFlow()
-
-    private val _waveSpeed = MutableStateFlow(1.0f)
-    val waveSpeed: StateFlow<Float> = _waveSpeed.asStateFlow()
-
-    private val _waveRoughness = MutableStateFlow(1.0f)
-    val waveRoughness: StateFlow<Float> = _waveRoughness.asStateFlow()
-
-    private val _waveColorStyle = MutableStateFlow("Dynamic Track")
-    val waveColorStyle: StateFlow<String> = _waveColorStyle.asStateFlow()
 
     fun setThemeColorMode(mode: ThemeColorMode) {
         _themeColorMode.value = mode
         playbackState.value.currentSong?.let {
             updateCurrentSongColor(it)
         }
-    }
-
-    fun setFluidBgEnabled(enabled: Boolean) {
-        _fluidBgEnabled.value = enabled
-    }
-
-    fun setWaveSpeed(speed: Float) {
-        _waveSpeed.value = speed
-    }
-
-    fun setWaveRoughness(roughness: Float) {
-        _waveRoughness.value = roughness
-    }
-
-    fun setWaveColorStyle(style: String) {
-        _waveColorStyle.value = style
     }
 
     private val _serviceConnected = MutableStateFlow(false)
@@ -177,24 +149,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // --- Service Lifecycle Links ---
 
     fun bindPlaybackService(context: Context) {
-        try {
-            val appContext = context.applicationContext
-            val intent = Intent(appContext, PlaybackService::class.java)
-            appContext.startService(intent) // keeps service sticky
-            appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        val intent = Intent(context, PlaybackService::class.java)
+        context.startService(intent) // keeps service sticky
+        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     fun unbindPlaybackService(context: Context) {
         if (_serviceConnected.value) {
-            try {
-                val appContext = context.applicationContext
-                appContext.unbindService(serviceConnection)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            context.unbindService(serviceConnection)
             _serviceConnected.value = false
             playbackService = null
         }

@@ -15,6 +15,6 @@ data class PlaybackState(
     val bgBlurRadius: Float = 10f,
     val bgAlpha: Float = 0.24f,
     val bgScale: Float = 2.4f,
-    val bgWaveOpacity: Float = 0.85f,
+    val bgWaveOpacity: Float = 0.35f,
     val bgContentScale: String = "Crop"
 )
